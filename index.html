@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Laser Draw Trainer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700&family=Barlow:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme:light;
+  --bg:#e4e7e2; --surface:#f6f7f4; --text:#15191b; --muted:#5d6864; --line:#bcc4bd;
+  --accent:#e4631a; --accent-ink:#ffffff; --ok:#1d8a4a; --bad:#c42a1b; --stage:#101314;
+  --display:"Barlow Condensed","Arial Narrow",Impact,sans-serif;
+  --body:"Barlow","Helvetica Neue",Arial,sans-serif;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#171b1e; --surface:#21272b; --text:#eef1ee; --muted:#95a19c; --line:#343d42;
+    --accent:#ff7a2e; --accent-ink:#15191b; --ok:#3fd37f; --bad:#ff5a47; --stage:#0d1012;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#171b1e; --surface:#21272b; --text:#eef1ee; --muted:#95a19c; --line:#343d42;
+  --accent:#ff7a2e; --accent-ink:#15191b; --ok:#3fd37f; --bad:#ff5a47; --stage:#0d1012;
+}
+html{ scroll-padding-top:env(safe-area-inset-top,0px); }
+*,*::before,*::after{ box-sizing:inherit; }
+body{ margin:0; background:var(--bg); color:var(--text); font-family:var(--body); font-size:16px; line-height:1.4; -webkit-font-smoothing:antialiased; }
+.app{ max-width:600px; margin:0 auto; padding:12px 14px 40px; }
+header{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:10px; }
+h1{ font-family:var(--display); font-weight:700; font-size:28px; margin:0; letter-spacing:.01em; }
+.pill{ font-size:13px; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:3px 10px; white-space:nowrap; }
+.pill.on{ color:var(--ok); border-color:var(--ok); }
+.stage{ position:relative; width:100%; aspect-ratio:4/3; background:var(--stage); border-radius:10px; overflow:hidden; touch-action:manipulation; }
+.stage video,.stage canvas{ position:absolute; inset:0; width:100%; height:100%; }
+.stage video{ object-fit:fill; }
+.stage .hint{ position:absolute; left:0; right:0; bottom:0; padding:10px 12px; font-size:15px; color:#f2f2f2; background:linear-gradient(transparent,rgba(0,0,0,.7)); pointer-events:none; }
+.stage .hint:empty{ display:none; }
+.readout{ display:grid; grid-template-columns:1fr auto; align-items:end; gap:8px; margin:14px 0 4px; }
+.clock{ font-family:var(--display); font-weight:700; font-size:88px; line-height:.9; font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+.clock small{ font-size:32px; font-weight:500; color:var(--muted); margin-left:4px; }
+.clock.under{ color:var(--ok); }
+.clock.over{ color:var(--bad); }
+.result{ text-align:right; font-family:var(--display); font-weight:500; font-size:20px; line-height:1.1; color:var(--muted); }
+.result .zone{ display:block; font-size:40px; font-weight:700; color:var(--text); }
+.status{ min-height:22px; color:var(--muted); font-size:15px; }
+.controls{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin:12px 0; }
+button{ font:inherit; font-family:var(--display); font-weight:600; font-size:19px; letter-spacing:.01em; padding:12px 8px; border-radius:8px; border:1px solid var(--line); background:var(--surface); color:var(--text); cursor:pointer; min-height:48px; }
+button.primary{ background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+button.quiet{ font-family:var(--body); font-weight:600; font-size:14px; padding:8px 12px; min-height:36px; }
+button:disabled{ opacity:.45; cursor:default; }
+button:focus-visible,input:focus-visible,select:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+details{ background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:10px 14px; margin:12px 0; }
+summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:20px; }
+.grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px 14px; margin-top:10px; }
+.field{ display:flex; flex-direction:column; gap:4px; font-size:14px; color:var(--muted); }
+.field input,.field select{ font:inherit; font-size:16px; color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px; width:100%; }
+.field.wide{ grid-column:1 / -1; }
+.check{ flex-direction:row; align-items:center; gap:8px; color:var(--text); }
+.check input{ width:20px; height:20px; }
+.panel{ display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start; background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-top:12px; }
+#map{ width:150px; height:auto; border-radius:4px; }
+.stats{ font-size:15px; }
+.stats .row{ display:flex; justify-content:space-between; gap:12px; padding:3px 0; border-bottom:1px solid var(--line); }
+.stats .row:last-child{ border-bottom:0; }
+.stats b{ font-family:var(--display); font-weight:700; font-size:20px; }
+.history{ margin-top:12px; max-height:280px; overflow:auto; }
+.history table{ width:100%; border-collapse:collapse; font-size:15px; font-variant-numeric:tabular-nums; }
+.history td,.history th{ text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); }
+.history th{ color:var(--muted); font-weight:600; font-size:13px; }
+.history td.t{ font-family:var(--display); font-size:18px; font-weight:600; }
+.actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+.empty{ color:var(--muted); font-size:15px; }
+@media (prefers-reduced-motion: reduce){ *{ transition:none !important; animation:none !important; } }
+@media (max-width:380px){ .clock{ font-size:72px; } .controls{ grid-template-columns:1fr 1fr; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Laser draw trainer</h1>
+    <span class="pill" id="pill">Camera off</span>
+  </header>
+
+  <div class="stage" id="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="overlay"></canvas>
+    <div class="hint" id="hint">Start the camera, then calibrate the target.</div>
+  </div>
+
+  <div class="readout">
+    <div class="clock" id="clock">0.00<small>s</small></div>
+    <div class="result"><span class="zone" id="zone">&mdash;</span><span id="repLabel">No reps yet</span></div>
+  </div>
+  <div class="status" id="status"></div>
+
+  <div class="controls">
+    <button id="btnCam">Start camera</button>
+    <button id="btnCal" disabled>Calibrate</button>
+    <button id="btnDrill" class="primary" disabled>Start drill</button>
+  </div>
+
+  <details id="settings">
+    <summary>Settings</summary>
+    <div class="grid">
+      <label class="field">Laser color
+        <select id="sColor"><option value="red">Red</option><option value="green">Green</option><option value="any">Either</option></select>
+      </label>
+      <label class="field">Sensitivity (0 to 100)<input id="sSens" type="number" min="0" max="100" step="5"></label>
+      <label class="field">Shortest start delay (s)<input id="sMin" type="number" min="0.5" max="20" step="0.5"></label>
+      <label class="field">Longest start delay (s)<input id="sMax" type="number" min="0.5" max="20" step="0.5"></label>
+      <label class="field">Par time (s)<input id="sPar" type="number" min="0.3" max="10" step="0.05"></label>
+      <label class="field">No-shot timeout (s)<input id="sTimeout" type="number" min="2" max="30" step="1"></label>
+      <label class="field">Target width (in)<input id="sTW" type="number" min="2" max="48" step="0.5"></label>
+      <label class="field">Target height (in)<input id="sTH" type="number" min="2" max="72" step="0.5"></label>
+      <label class="field">Camera latency offset (ms)<input id="sLat" type="number" min="-200" max="500" step="5"></label>
+      <label class="field">Pause between reps (s)<input id="sRepeat" type="number" min="2" max="30" step="1"></label>
+      <label class="field check wide"><input id="sParBeep" type="checkbox"> Second beep at par time</label>
+      <label class="field check wide"><input id="sAuto" type="checkbox"> Start the next rep automatically</label>
+    </div>
+    <div class="actions">
+      <button class="quiet" id="btnBeep">Test beep</button>
+      <button class="quiet" id="btnReset">Reset settings</button>
+    </div>
+  </details>
+
+  <div class="panel">
+    <canvas id="map" width="150" height="194"></canvas>
+    <div class="stats" id="stats"></div>
+  </div>
+  <div class="history" id="history"></div>
+  <div class="actions">
+    <button class="quiet" id="btnCopy">Copy history as JSON</button>
+    <button class="quiet" id="btnClear">Clear history</button>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+// ---------------------------------------------------------------------------
+// Detection. Pure function of pixel data; no DOM access. Covered by tests/run.js.
+// ---------------------------------------------------------------------------
+// @ldt-detector-start
+function createDetector(W, H){
+  const n = W * H;
+  const bgM = new Float32Array(n);   // background: brightest channel per pixel
+  const bgS = new Float32Array(n);   // background: laser-color dominance per pixel
+  const mask = new Uint8Array(n);
+  const stack = new Int32Array(n);
+  const WARM = 15;
+  let frames = 0;
+
+  // d: RGBA pixel data. o: { sens 0-100, color 'red'|'green'|'any', freeze bool }
+  function run(d, o){
+    const sens = o.sens == null ? 60 : o.sens;
+    const minBright = Math.round(250 - sens * 1.2);
+    const diffT = Math.round(110 - sens);
+    const dom = 40;
+    const wantRed = o.color !== 'green', wantGreen = o.color !== 'red';
+    const maxCand = Math.floor(n * 0.04);
+    const warm = frames < WARM;
+    const alpha = warm ? 0.5 : 0.06;
+    const freeze = !!o.freeze && !warm;
+    mask.fill(0);
+    let count = 0, flooded = false;
+
+    for(let i = 0, p = 0; i < n; i++, p += 4){
+      const r = d[p], g = d[p + 1], b = d[p + 2];
+      const m = r > g ? (r > b ? r : b) : (g > b ? g : b);
+      let s = 0;
+      if(wantRed){ const t = r - (g > b ? g : b); if(t > s) s = t; }
+      if(wantGreen){ const t = g - (r > b ? r : b); if(t > s) s = t; }
+      const pm = bgM[i], ps = bgS[i];
+      if(!freeze){ bgM[i] = pm + (m - pm) * alpha; bgS[i] = ps + (s - ps) * alpha; }
+      if(warm) continue;
+      let c = 0;
+      if(s >= dom && m >= minBright && s - ps >= diffT) c = 1;           // colored fringe
+      else if(r > 235 && g > 235 && b > 235 && m - pm >= diffT) c = 2;  // blown-out core
+      if(!c) continue;
+      mask[i] = c;
+      if(++count > maxCand){ flooded = true; break; }
+    }
+    frames++;
+    if(warm || flooded || count === 0) return { blob: null, flooded };
+
+    // Largest 4-connected component that contains at least one colored pixel.
+    let best = null;
+    for(let i = 0; i < n; i++){
+      if(!mask[i]) continue;
+      let sp = 0; stack[sp++] = i;
+      let col = mask[i] === 1 ? 1 : 0; mask[i] = 0;
+      let cnt = 0, sx = 0, sy = 0;
+      while(sp){
+        const j = stack[--sp]; cnt++;
+        const x = j % W, y = (j - x) / W; sx += x; sy += y;
+        if(x > 0 && mask[j - 1]){ if(mask[j - 1] === 1) col++; mask[j - 1] = 0; stack[sp++] = j - 1; }
+        if(x < W - 1 && mask[j + 1]){ if(mask[j + 1] === 1) col++; mask[j + 1] = 0; stack[sp++] = j + 1; }
+        if(y > 0 && mask[j - W]){ if(mask[j - W] === 1) col++; mask[j - W] = 0; stack[sp++] = j - W; }
+        if(y < H - 1 && mask[j + W]){ if(mask[j + W] === 1) col++; mask[j + W] = 0; stack[sp++] = j + W; }
+      }
+      if(cnt >= 2 && col > 0 && (!best || cnt > best.n)) best = { x: sx / cnt + 0.5, y: sy / cnt + 0.5, n: cnt };
+    }
+    return { blob: best, flooded: false };
+  }
+  return { run, get frames(){ return frames; } };
+}
+// @ldt-detector-end
+
+// ---------------------------------------------------------------------------
+// Geometry. Four tapped corners -> homography onto the unit square.
+// ---------------------------------------------------------------------------
+// @ldt-geom-start
+function solveLinear(A, B){
+  const n = B.length;
+  const M = A.map((row, i) => row.concat([B[i]]));
+  for(let col = 0; col < n; col++){
+    let piv = col;
+    for(let r = col + 1; r < n; r++) if(Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
+    if(Math.abs(M[piv][col]) < 1e-12) return null;
+    const tmp = M[col]; M[col] = M[piv]; M[piv] = tmp;
+    for(let r = 0; r < n; r++){
+      if(r === col) continue;
+      const f = M[r][col] / M[col][col];
+      if(!f) continue;
+      for(let k = col; k <= n; k++) M[r][k] -= f * M[col][k];
+    }
+  }
+  return M.map((row, i) => row[n] / row[i]);
+}
+// corners: [{x,y} TL, TR, BR, BL] in image space
+function homographyToUnit(corners){
+  const dst = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  const A = [], B = [];
+  for(let i = 0; i < 4; i++){
+    const x = corners[i].x, y = corners[i].y, u = dst[i][0], v = dst[i][1];
+    A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); B.push(u);
+    A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); B.push(v);
+  }
+  const h = solveLinear(A, B);
+  return h ? [h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], 1] : null;
+}
+function applyH(h, x, y){
+  const w = h[6] * x + h[7] * y + 1;
+  return [(h[0] * x + h[1] * y + h[2]) / w, (h[3] * x + h[4] * y + h[5]) / w];
+}
+// @ldt-geom-end
+
+// ---------------------------------------------------------------------------
+// Settings and storage
+// ---------------------------------------------------------------------------
+const DEFAULTS = { color: 'red', sens: 60, minDelay: 2, maxDelay: 5, par: 1.5, timeout: 8, targetW: 8.5, targetH: 11, latency: 0, repeatDelay: 6, parBeep: true, auto: true };
+const LS_SET = 'ldt.settings', LS_HIST = 'ldt.history';
+function lsGet(k, fallback){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; }catch(e){ return fallback; } }
+function lsSet(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+const S = Object.assign({}, DEFAULTS, lsGet(LS_SET, {}));
+let history = lsGet(LS_HIST, []);
+if(!Array.isArray(history)) history = [];
+
+const $ = id => document.getElementById(id);
+const video = $('video'), overlay = $('overlay'), hint = $('hint'), pill = $('pill'), clock = $('clock');
+const zoneEl = $('zone'), repLabel = $('repLabel'), statusEl = $('status');
+const btnCam = $('btnCam'), btnCal = $('btnCal'), btnDrill = $('btnDrill'), btnBeep = $('btnBeep');
+const btnReset = $('btnReset'), btnCopy = $('btnCopy'), btnClear = $('btnClear');
+const map = $('map'), statsEl = $('stats'), histEl = $('history'), stage = $('stage');
+const octx = overlay.getContext('2d');
+const work = document.createElement('canvas');
+const wctx = work.getContext('2d', { willReadFrequently: true });
+
+const fields = { color: 'sColor', sens: 'sSens', minDelay: 'sMin', maxDelay: 'sMax', par: 'sPar', timeout: 'sTimeout', targetW: 'sTW', targetH: 'sTH', latency: 'sLat', repeatDelay: 'sRepeat', parBeep: 'sParBeep', auto: 'sAuto' };
+function loadFields(){
+  for(const k in fields){ const el = $(fields[k]); if(el.type === 'checkbox') el.checked = !!S[k]; else el.value = S[k]; }
+}
+for(const k in fields){
+  const el = $(fields[k]);
+  el.addEventListener('change', () => {
+    if(el.type === 'checkbox') S[k] = el.checked;
+    else if(el.tagName === 'SELECT') S[k] = el.value;
+    else { const v = parseFloat(el.value); S[k] = isFinite(v) ? v : DEFAULTS[k]; el.value = S[k]; }
+    lsSet(LS_SET, S); drawMap();
+  });
+}
+loadFields();
+
+// ---------------------------------------------------------------------------
+// Runtime state
+// ---------------------------------------------------------------------------
+const DEBOUNCE_MS = 150, HOLD_MS = 500;
+let W = 320, H = 240, det = null, srcW = 0, srcH = 0;
+const st = { camOn: false, dotOn: false, dotSince: 0, dot: null, lastShotAt: -1e9, lastHit: null, lastHitAt: 0, flooded: false,
+  calibrating: false, corners: [], H: null, drill: 'idle', rep: 0, beepAt: 0, timers: [], session: [] };
+
+const fmt = t => t.toFixed(2);
+function setStatus(msg){ statusEl.textContent = msg; }
+function showZone(z){ zoneEl.textContent = (z === 'A' || z === 'C' || z === 'D') ? z + ' zone' : z; }
+function showTime(t){
+  clock.innerHTML = fmt(t) + '<small>s</small>';
+  const done = st.drill === 'done';
+  clock.classList.toggle('under', done && t > 0 && t <= S.par);
+  clock.classList.toggle('over', done && t > S.par);
+}
+function timer(fn, ms){ const id = setTimeout(fn, ms); st.timers.push(id); return id; }
+function clearTimers(){ st.timers.forEach(id => clearTimeout(id)); st.timers = []; }
+
+function initBuffers(){
+  srcW = video.videoWidth || 640; srcH = video.videoHeight || 480;
+  W = 320; H = Math.max(120, Math.round(320 * srcH / srcW));
+  work.width = W; work.height = H; overlay.width = W; overlay.height = H;
+  stage.style.aspectRatio = srcW + ' / ' + srcH;
+  det = createDetector(W, H);
+  st.corners = []; st.H = null; st.calibrating = false; st.dotOn = false; st.dot = null;
+  btnCal.textContent = 'Calibrate';
+}
+
+// ---------------------------------------------------------------------------
+// Camera
+// ---------------------------------------------------------------------------
+async function startCamera(){
+  if(st.camOn){ stopCamera(); return; }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    setStatus('This browser cannot open the camera. Open the page in Safari or Chrome.'); return;
+  }
+  btnCam.disabled = true; setStatus('Opening camera.');
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 960 }, frameRate: { ideal: 60 } }
+    });
+    video.srcObject = stream;
+    await video.play();
+    await new Promise(res => { if(video.videoWidth) res(); else video.addEventListener('loadedmetadata', res, { once: true }); });
+    initBuffers();
+    st.camOn = true;
+    btnCam.textContent = 'Stop camera'; btnCal.disabled = false; btnDrill.disabled = false;
+    const s = stream.getVideoTracks()[0].getSettings();
+    pill.textContent = (s.width || '?') + 'x' + (s.height || '?') + (s.frameRate ? ' at ' + Math.round(s.frameRate) + ' fps' : '');
+    pill.classList.add('on');
+    hint.textContent = 'Tap Calibrate, then tap the four corners of the target.';
+    setStatus('');
+    loop();
+  }catch(err){
+    setStatus('Camera failed: ' + err.name + '. Allow camera access and try again.');
+  }
+  btnCam.disabled = false;
+}
+function stopCamera(){
+  st.camOn = false;
+  const s = video.srcObject; if(s) s.getTracks().forEach(t => t.stop());
+  video.srcObject = null;
+  stopDrill();
+  btnCam.textContent = 'Start camera'; btnCal.disabled = true; btnDrill.disabled = true;
+  pill.textContent = 'Camera off'; pill.classList.remove('on');
+  octx.clearRect(0, 0, W, H);
+  hint.textContent = 'Start the camera, then calibrate the target.';
+}
+function loop(){
+  if(!st.camOn) return;
+  if('requestVideoFrameCallback' in video){
+    video.requestVideoFrameCallback((now, meta) => { processFrame((meta && meta.captureTime) || now); loop(); });
+  } else {
+    requestAnimationFrame(now => { processFrame(now); loop(); });
+  }
+}
+function processFrame(ts){
+  if(!st.camOn) return;
+  if(video.videoWidth && (video.videoWidth !== srcW || video.videoHeight !== srcH)){
+    initBuffers(); setStatus('Camera orientation changed. Calibrate again.');
+  }
+  if(!det) return;
+  wctx.drawImage(video, 0, 0, W, H);
+  const d = wctx.getImageData(0, 0, W, H).data;
+  const freeze = st.dotOn && (ts - st.dotSince) < HOLD_MS;
+  const res = det.run(d, { sens: S.sens, color: S.color, freeze });
+  st.flooded = res.flooded;
+  if(res.blob){
+    if(!st.dotOn){
+      st.dotOn = true; st.dotSince = ts;
+      if(ts - st.lastShotAt >= DEBOUNCE_MS){ st.lastShotAt = ts; onShot(ts, res.blob); }
+    }
+    st.dot = res.blob;
+  } else { st.dotOn = false; st.dot = null; }
+  drawOverlay(ts);
+}
+
+// ---------------------------------------------------------------------------
+// Calibration
+// ---------------------------------------------------------------------------
+btnCal.addEventListener('click', () => {
+  st.calibrating = true; st.corners = []; st.H = null;
+  hint.textContent = 'Tap the top-left corner of the target.';
+  setStatus('');
+});
+overlay.addEventListener('pointerdown', e => {
+  if(!st.camOn || !st.calibrating) return;
+  e.preventDefault();
+  const r = overlay.getBoundingClientRect();
+  st.corners.push({ x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H });
+  const names = ['top-right', 'bottom-right', 'bottom-left'];
+  if(st.corners.length < 4){ hint.textContent = 'Tap the ' + names[st.corners.length - 1] + ' corner.'; return; }
+  st.H = homographyToUnit(st.corners);
+  st.calibrating = false;
+  if(st.H){ btnCal.textContent = 'Recalibrate'; hint.textContent = ''; setStatus('Calibrated. Holster, then tap Start drill.'); }
+  else { st.corners = []; hint.textContent = 'Those corners do not form a quadrilateral. Tap Calibrate and try again.'; }
+});
+
+const zoneA = () => 0.15 * S.targetW;
+const zoneC = () => 0.30 * S.targetW;
+function scoreHit(x, y){
+  if(!st.H) return { zone: 'Hit', u: null, v: null };
+  const uv = applyH(st.H, x, y), u = uv[0], v = uv[1];
+  const dx = (u - 0.5) * S.targetW, dy = (v - 0.5) * S.targetH, r = Math.hypot(dx, dy);
+  const onPaper = Math.abs(dx) <= S.targetW / 2 && Math.abs(dy) <= S.targetH / 2;
+  let zone = 'Miss';
+  if(r <= zoneA()) zone = 'A'; else if(r <= zoneC()) zone = 'C'; else if(onPaper) zone = 'D';
+  return { zone, u, v };
+}
+
+// ---------------------------------------------------------------------------
+// Drill: draw to first shot
+// ---------------------------------------------------------------------------
+let actx = null, wakeLock = null, clockRaf = 0;
+function ensureAudio(){
+  if(!actx){ const AC = window.AudioContext || window.webkitAudioContext; if(AC) actx = new AC(); }
+  if(actx && actx.state === 'suspended') actx.resume();
+}
+// Returns the lead time in ms from now until the tone actually sounds.
+function beep(freq, dur){
+  ensureAudio(); if(!actx) return 0;
+  const t0 = actx.currentTime + 0.02;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = 'square'; o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.5, t0 + 0.005);
+  g.gain.setValueAtTime(0.5, t0 + dur - 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(actx.destination);
+  o.start(t0); o.stop(t0 + dur + 0.02);
+  return 20 + ((actx.baseLatency || 0) + (actx.outputLatency || 0)) * 1000;
+}
+async function keepAwake(){
+  try{ if('wakeLock' in navigator && !wakeLock){ wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } }catch(e){}
+}
+function startClock(){
+  cancelAnimationFrame(clockRaf);
+  const tick = () => { if(st.drill !== 'listening') return; showTime((performance.now() - st.beepAt) / 1000); clockRaf = requestAnimationFrame(tick); };
+  clockRaf = requestAnimationFrame(tick);
+}
+function stopClock(){ cancelAnimationFrame(clockRaf); }
+
+function startRep(){
+  clearTimers();
+  st.rep++; st.drill = 'standby';
+  btnDrill.textContent = 'Stop';
+  showTime(0); showZone('\u2014'); repLabel.textContent = 'Rep ' + st.rep;
+  setStatus('Standby.');
+  const delay = (S.minDelay + Math.random() * Math.max(0, S.maxDelay - S.minDelay)) * 1000;
+  timer(() => {
+    const lead = beep(1800, 0.12);
+    st.beepAt = performance.now() + lead;
+    st.drill = 'listening';
+    setStatus('Go.');
+    startClock();
+    if(S.parBeep) timer(() => beep(1000, 0.08), S.par * 1000 + lead);
+    timer(onTimeout, S.timeout * 1000 + lead);
+  }, delay);
+}
+function onTimeout(){
+  stopClock(); st.drill = 'done';
+  recordRep({ t: null, zone: 'No shot', u: null, v: null, early: false });
+  showZone('No shot');
+  setStatus('Rep ' + st.rep + ': no shot within ' + S.timeout + ' s. Tap Start drill to continue.');
+  btnDrill.textContent = 'Start drill';
+}
+function scheduleNext(){
+  btnDrill.textContent = 'Stop';
+  let left = S.repeatDelay;
+  setStatus('Next rep in ' + left + ' s. Reset the slide and holster.');
+  const tickId = setInterval(() => {
+    left--;
+    if(left <= 0){ clearTimeout(tickId); return; }
+    setStatus('Next rep in ' + left + ' s. Reset the slide and holster.');
+  }, 1000);
+  st.timers.push(tickId);
+  timer(startRep, S.repeatDelay * 1000);
+}
+function stopDrill(){
+  clearTimers(); stopClock();
+  if(st.drill !== 'idle'){ setStatus('Drill stopped.'); }
+  st.drill = 'idle';
+  btnDrill.textContent = 'Start drill';
+}
+btnDrill.addEventListener('click', () => {
+  if(st.drill === 'idle'){ ensureAudio(); keepAwake(); startRep(); }
+  else stopDrill();
+});
+btnBeep.addEventListener('click', () => beep(1800, 0.12));
+
+function onShot(ts, blob){
+  const hit = scoreHit(blob.x, blob.y);
+  st.lastHit = { px: blob.x, py: blob.y, u: hit.u, v: hit.v, zone: hit.zone }; st.lastHitAt = ts;
+  if(st.drill === 'listening'){
+    clearTimers(); stopClock();
+    const t = Math.max(0, (ts - st.beepAt - S.latency) / 1000);
+    st.drill = 'done';
+    recordRep({ t, zone: hit.zone, u: hit.u, v: hit.v, early: false });
+    showTime(t); showZone(hit.zone);
+    setStatus('Rep ' + st.rep + ': ' + fmt(t) + ' s, ' + (hit.zone === 'Hit' ? 'hit (not calibrated)' : hit.zone) + '.');
+    if(S.auto) scheduleNext(); else btnDrill.textContent = 'Start drill';
+  } else if(st.drill === 'standby'){
+    clearTimers(); stopClock();
+    st.drill = 'done';
+    recordRep({ t: null, zone: hit.zone, u: hit.u, v: hit.v, early: true });
+    showZone('Early');
+    setStatus('Rep ' + st.rep + ': shot before the beep.');
+    if(S.auto) scheduleNext(); else btnDrill.textContent = 'Start drill';
+  } else {
+    showZone(hit.zone);
+    setStatus('Free shot: ' + (hit.zone === 'Hit' ? 'hit (calibrate for zones)' : hit.zone) + '.');
+  }
+  drawMap();
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+function drawOverlay(ts){
+  octx.clearRect(0, 0, W, H);
+  if(st.corners.length){
+    octx.strokeStyle = '#ff7a2e'; octx.lineWidth = 2; octx.beginPath();
+    st.corners.forEach((c, i) => { if(i) octx.lineTo(c.x, c.y); else octx.moveTo(c.x, c.y); });
+    if(st.corners.length === 4) octx.closePath();
+    octx.stroke();
+    octx.fillStyle = '#ff7a2e';
+    st.corners.forEach(c => { octx.beginPath(); octx.arc(c.x, c.y, 4, 0, Math.PI * 2); octx.fill(); });
+  }
+  if(st.dot){ octx.strokeStyle = '#ffffff'; octx.lineWidth = 2; octx.beginPath(); octx.arc(st.dot.x, st.dot.y, 8, 0, Math.PI * 2); octx.stroke(); }
+  if(st.lastHit && ts - st.lastHitAt < 2000){ octx.strokeStyle = '#ff7a2e'; octx.lineWidth = 3; octx.beginPath(); octx.arc(st.lastHit.px, st.lastHit.py, 12, 0, Math.PI * 2); octx.stroke(); }
+  if(st.flooded){
+    octx.fillStyle = 'rgba(0,0,0,.65)'; octx.fillRect(0, 0, W, 22);
+    octx.fillStyle = '#ffffff'; octx.font = '12px sans-serif';
+    octx.fillText('Too much light. Lower sensitivity or dim the room.', 6, 15);
+  }
+}
+function drawMap(){
+  const mw = 150, mh = Math.max(40, Math.round(150 * S.targetH / S.targetW));
+  if(map.height !== mh) map.height = mh;
+  const c = map.getContext('2d');
+  c.clearRect(0, 0, mw, mh);
+  c.fillStyle = '#f6f7f4'; c.fillRect(0, 0, mw, mh);
+  c.strokeStyle = '#5d6864'; c.lineWidth = 1; c.strokeRect(0.5, 0.5, mw - 1, mh - 1);
+  const sx = mw / S.targetW, cx = mw / 2, cy = mh / 2;
+  c.beginPath(); c.arc(cx, cy, zoneC() * sx, 0, Math.PI * 2); c.stroke();
+  c.fillStyle = '#15191b'; c.beginPath(); c.arc(cx, cy, zoneA() * sx, 0, Math.PI * 2); c.fill();
+  const pts = st.session.filter(r => r.u != null).slice(-30);
+  pts.forEach(r => { c.fillStyle = 'rgba(228,99,26,.6)'; c.beginPath(); c.arc(r.u * mw, r.v * mh, 3.5, 0, Math.PI * 2); c.fill(); });
+  if(st.lastHit && st.lastHit.u != null){
+    c.fillStyle = '#e4631a'; c.beginPath(); c.arc(st.lastHit.u * mw, st.lastHit.v * mh, 5, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = '#ffffff'; c.lineWidth = 1.5; c.stroke();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Session log
+// ---------------------------------------------------------------------------
+function recordRep(r){
+  const rep = { n: st.rep, t: r.t, zone: r.zone, u: r.u, v: r.v, early: !!r.early, par: S.par, at: new Date().toISOString() };
+  st.session.push(rep);
+  history.push(rep);
+  if(history.length > 500) history = history.slice(-500);
+  lsSet(LS_HIST, history);
+  renderStats();
+}
+function renderStats(){
+  const reps = st.session, timed = reps.filter(r => r.t != null);
+  const hits = reps.filter(r => r.zone === 'A' || r.zone === 'C' || r.zone === 'D' || r.zone === 'Hit');
+  const avg = timed.length ? timed.reduce((a, r) => a + r.t, 0) / timed.length : null;
+  const best = timed.length ? Math.min.apply(null, timed.map(r => r.t)) : null;
+  const under = timed.filter(r => r.t <= r.par).length;
+  const row = (k, v) => '<div class="row"><span>' + k + '</span><b>' + v + '</b></div>';
+  statsEl.innerHTML = reps.length
+    ? row('Reps', reps.length) + row('Average', avg != null ? fmt(avg) + ' s' : '\u2014') + row('Best', best != null ? fmt(best) + ' s' : '\u2014')
+      + row('Under par', timed.length ? under + ' of ' + timed.length : '\u2014') + row('Hits', hits.length + ' of ' + reps.length)
+    : '<div class="empty">Session stats appear here after the first rep.</div>';
+  const recent = history.slice(-20).reverse();
+  histEl.innerHTML = recent.length
+    ? '<table><tr><th>Time</th><th>Zone</th><th>Par</th><th>When</th></tr>' + recent.map(r => {
+        const when = new Date(r.at);
+        const t = r.early ? 'Early' : (r.t == null ? '\u2014' : fmt(r.t) + ' s');
+        return '<tr><td class="t">' + t + '</td><td>' + r.zone + '</td><td>' + fmt(r.par) + ' s</td><td>' + when.toLocaleDateString() + ' ' + when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '</td></tr>';
+      }).join('') + '</table>'
+    : '';
+}
+btnCopy.addEventListener('click', async () => {
+  const text = JSON.stringify(history, null, 2);
+  try{ await navigator.clipboard.writeText(text); setStatus('Copied ' + history.length + ' reps as JSON.'); }
+  catch(e){ setStatus('Clipboard unavailable. Allow clipboard access and try again.'); }
+});
+btnClear.addEventListener('click', () => {
+  history = []; st.session = []; st.lastHit = null; lsSet(LS_HIST, history);
+  renderStats(); drawMap(); setStatus('History cleared.');
+});
+btnReset.addEventListener('click', () => { Object.assign(S, DEFAULTS); lsSet(LS_SET, S); loadFields(); drawMap(); setStatus('Settings reset.'); });
+btnCam.addEventListener('click', startCamera);
+document.addEventListener('visibilitychange', () => { if(document.hidden && st.drill !== 'idle') stopDrill(); });
+
+renderStats();
+drawMap();
+})();
+</script>
+</body>
+</html>
