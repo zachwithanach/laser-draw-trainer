@@ -74,6 +74,15 @@ summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:
 .stats .row{ display:flex; justify-content:space-between; gap:12px; padding:3px 0; border-bottom:1px solid var(--line); }
 .stats .row:last-child{ border-bottom:0; }
 .stats b{ font-family:var(--display); font-weight:700; font-size:20px; }
+.analysis{ margin-top:12px; }
+.ana-head{ display:flex; gap:12px; margin-top:10px; }
+.ana-head .field{ min-width:170px; }
+.ana-grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-top:12px; }
+.ana-grid div{ background:var(--bg); border-radius:8px; padding:8px 10px; }
+.ana-grid span{ display:block; font-size:13px; color:var(--muted); }
+.ana-grid b{ font-family:var(--display); font-weight:700; font-size:24px; font-variant-numeric:tabular-nums; }
+.ana-notes{ margin:12px 0 0; padding-left:20px; font-size:15px; }
+.ana-notes li{ margin:4px 0; }
 .history{ margin-top:12px; max-height:280px; overflow:auto; }
 .history table{ width:100%; border-collapse:collapse; font-size:15px; font-variant-numeric:tabular-nums; }
 .history td,.history th{ text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); }
@@ -144,6 +153,15 @@ summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:
     <canvas id="map" width="150" height="194"></canvas>
     <div class="stats" id="stats"></div>
   </div>
+  <details class="analysis" id="analysis" open>
+    <summary>Analysis</summary>
+    <div class="ana-head">
+      <label class="field">Data<select id="anaScope"><option value="session">This session</option><option value="all">All history</option></select></label>
+    </div>
+    <div class="ana-grid" id="anaGrid"></div>
+    <ul class="ana-notes" id="anaNotes"></ul>
+    <div class="actions"><button class="quiet" id="btnPar" hidden></button></div>
+  </details>
   <div class="history" id="history"></div>
   <div class="actions">
     <button class="quiet" id="btnCopy">Copy history as JSON</button>
@@ -316,6 +334,75 @@ function aimCheck(samples, tp, o){
   return { ok: true, reason: '', at: at };
 }
 // @ldt-aim-end
+
+// ---------------------------------------------------------------------------
+// Analysis. Pure. Summarizes reps and writes coaching notes.
+// reps: recorded rep objects. o: { targetW, targetH } in inches.
+// ---------------------------------------------------------------------------
+// @ldt-analysis-start
+function analyzeReps(reps, o){
+  const W = o.targetW, H = o.targetH;
+  const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+  const median = a => { const b = a.slice().sort((x, y) => x - y), m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; };
+  const r2 = x => Math.round(x * 100) / 100;
+  const out = { reps: reps.length, timed: 0, outliers: 0, avg: null, avgAll: null, best: null, underPar: 0,
+    zones: { A: 0, C: 0, D: 0, Miss: 0, Hit: 0, 'No shot': 0, Early: 0 }, biasX: null, biasY: null,
+    spreadX: null, spreadY: null, mvMedian: null, trend: null, suggestedPar: null, notes: [] };
+  reps.forEach(r => { const z = r.early ? 'Early' : r.zone; if(z in out.zones) out.zones[z]++; });
+  const timed = reps.filter(r => r.t != null && !r.early);
+  out.timed = timed.length;
+  if(!timed.length){ out.notes.push('Complete a few reps to see your analysis.'); return out; }
+  const allT = timed.map(r => r.t), med = median(allT);
+  const core = timed.filter(r => r.t <= med * 1.6);
+  out.outliers = timed.length - core.length;
+  out.avgAll = r2(mean(allT));
+  out.avg = r2(mean(core.map(r => r.t)));
+  out.best = r2(Math.min.apply(null, allT));
+  out.underPar = timed.filter(r => r.t <= r.par).length;
+  const placed = reps.filter(r => r.u != null && r.v != null);
+  if(placed.length){
+    const xs = placed.map(r => (r.u - 0.5) * W), ys = placed.map(r => (0.5 - r.v) * H);
+    out.biasX = r2(mean(xs)); out.biasY = r2(mean(ys));
+    out.spreadX = r2(Math.max.apply(null, xs) - Math.min.apply(null, xs));
+    out.spreadY = r2(Math.max.apply(null, ys) - Math.min.apply(null, ys));
+  }
+  const mvs = reps.filter(r => r.mv != null).map(r => r.mv);
+  if(mvs.length) out.mvMedian = r2(median(mvs));
+  if(core.length >= 6){
+    const k = Math.floor(core.length / 3);
+    const first = mean(core.slice(0, k).map(r => r.t)), last = mean(core.slice(-k).map(r => r.t));
+    out.trend = r2(last - first);
+  }
+  const par = timed[timed.length - 1].par;
+  const n = out.notes;
+  if(out.outliers) n.push(out.outliers + ' slow rep' + (out.outliers > 1 ? 's' : '') + ' (over 1.6x your median) excluded from the average.');
+  if(out.underPar === 0 && out.avg > par){
+    out.suggestedPar = Math.round(out.avg * 20) / 20;
+    n.push('No reps beat the ' + par.toFixed(2) + ' s par. Set par to ' + out.suggestedPar.toFixed(2) + ' s, your current average, and tighten it as you beat it.');
+  } else if(timed.length >= 5 && out.underPar / timed.length >= 0.7){
+    out.suggestedPar = Math.round((par - 0.1) * 20) / 20;
+    n.push('You beat par on ' + out.underPar + ' of ' + timed.length + ' reps. Tighten par to ' + out.suggestedPar.toFixed(2) + ' s.');
+  }
+  if(out.spreadY != null && placed.length >= 4){
+    if(out.spreadY > 2 && out.spreadY > out.spreadX * 1.5){
+      let msg = 'Hits string vertically (' + out.spreadY.toFixed(1) + ' in tall, ' + out.spreadX.toFixed(1) + ' in wide).';
+      if(out.biasY > 0.5) msg += ' They sit high, which usually means the shot breaks while the muzzle is still rising into the target.';
+      else if(out.biasY < -0.5) msg += ' They sit low, which usually means pushing the muzzle down in anticipation of recoil.';
+      n.push(msg);
+    } else if(out.spreadX > 2 && out.spreadX > out.spreadY * 1.5){
+      n.push('Hits spread horizontally (' + out.spreadX.toFixed(1) + ' in wide). Focus on pressing the trigger straight to the rear.');
+    }
+    if(Math.abs(out.biasX) > 0.75) n.push('Hits average ' + Math.abs(out.biasX).toFixed(1) + ' in ' + (out.biasX > 0 ? 'right' : 'left') + ' of center.');
+  }
+  if(out.trend != null){
+    if(out.trend > 0.2) n.push('Your last reps averaged ' + out.trend.toFixed(2) + ' s slower than your first. Rest between sets.');
+    else if(out.trend < -0.2) n.push('Your last reps averaged ' + (-out.trend).toFixed(2) + ' s faster than your first.');
+  }
+  if(out.mvMedian != null && out.mvMedian > 1) n.push('Median dot movement before the break is ' + out.mvMedian.toFixed(2) + ' in. Let the dot stop before you finish the press.');
+  if(!n.length) n.push('Solid set. Keep par where it is and repeat.');
+  return out;
+}
+// @ldt-analysis-end
 
 // ---------------------------------------------------------------------------
 // Settings and storage
@@ -803,6 +890,7 @@ function recordRep(r){
   if(history.length > 500) history = history.slice(-500);
   lsSet(LS_HIST, history);
   renderStats();
+  renderAnalysis();
 }
 function renderStats(){
   const reps = st.session, timed = reps.filter(r => r.t != null);
@@ -826,6 +914,28 @@ function renderStats(){
       }).join('') + '</table>'
     : '';
 }
+const anaScope = $('anaScope'), anaGrid = $('anaGrid'), anaNotes = $('anaNotes'), btnPar = $('btnPar');
+function renderAnalysis(){
+  const reps = anaScope.value === 'all' ? history : st.session;
+  const a = analyzeReps(reps, { targetW: S.targetW, targetH: S.targetH });
+  const cell = (k, v) => '<div><span>' + k + '</span><b>' + v + '</b></div>';
+  const dash = '\u2014', sec = v => v == null ? dash : v.toFixed(2) + ' s', inch = v => v == null ? dash : v.toFixed(2) + ' in';
+  const z = a.zones;
+  const vert = a.biasY == null ? dash : Math.abs(a.biasY).toFixed(1) + ' in ' + (a.biasY >= 0 ? 'high' : 'low');
+  const horz = a.biasX == null ? dash : Math.abs(a.biasX).toFixed(1) + ' in ' + (a.biasX >= 0 ? 'right' : 'left');
+  anaGrid.innerHTML = cell('Average', sec(a.avg)) + cell('Best', sec(a.best)) + cell('Under par', a.timed ? a.underPar + '/' + a.timed : dash)
+    + cell('A / C / D', z.A + ' / ' + z.C + ' / ' + z.D) + cell('Miss / none', (z.Miss + z.Early) + ' / ' + z['No shot']) + cell('Movement', inch(a.mvMedian))
+    + cell('Vertical', vert) + cell('Horizontal', horz) + cell('Spread', a.spreadY == null ? dash : a.spreadX.toFixed(1) + '\u00d7' + a.spreadY.toFixed(1) + ' in');
+  anaNotes.innerHTML = a.notes.map(t => '<li>' + t + '</li>').join('');
+  if(a.suggestedPar != null && Math.abs(a.suggestedPar - S.par) > 0.001){
+    btnPar.hidden = false; btnPar.textContent = 'Set par to ' + a.suggestedPar.toFixed(2) + ' s'; btnPar.dataset.par = a.suggestedPar;
+  } else btnPar.hidden = true;
+}
+anaScope.addEventListener('change', renderAnalysis);
+btnPar.addEventListener('click', () => {
+  S.par = parseFloat(btnPar.dataset.par); lsSet(LS_SET, S); loadFields(); renderAnalysis();
+  setStatus('Par set to ' + S.par.toFixed(2) + ' s.');
+});
 btnCopy.addEventListener('click', async () => {
   const text = JSON.stringify(history, null, 2);
   try{ await navigator.clipboard.writeText(text); setStatus('Copied ' + history.length + ' reps as JSON.'); }
@@ -833,13 +943,15 @@ btnCopy.addEventListener('click', async () => {
 });
 btnClear.addEventListener('click', () => {
   history = []; st.session = []; st.lastHit = null; lsSet(LS_HIST, history);
-  renderStats(); drawMap(); setStatus('History cleared.');
+  renderStats(); renderAnalysis(); drawMap(); setStatus('History cleared.');
 });
 btnReset.addEventListener('click', () => { Object.assign(S, DEFAULTS); lsSet(LS_SET, S); loadFields(); drawMap(); setStatus('Settings reset.'); });
 btnCam.addEventListener('click', startCamera);
 document.addEventListener('visibilitychange', () => { if(document.hidden && st.drill !== 'idle') stopDrill(); });
 
 renderStats();
+if(!st.session.length && history.length) anaScope.value = 'all';
+renderAnalysis();
 drawMap();
 })();
 </script>
