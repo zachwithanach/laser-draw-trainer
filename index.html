@@ -50,6 +50,13 @@ h1{ font-family:var(--display); font-weight:700; font-size:28px; margin:0; lette
 .clock.over{ color:var(--bad); }
 .result{ text-align:right; font-family:var(--display); font-weight:500; font-size:20px; line-height:1.1; color:var(--muted); }
 .result .zone{ display:block; font-size:40px; font-weight:700; color:var(--text); }
+.parbar{ height:10px; border-radius:5px; background:var(--line); overflow:hidden; margin:6px 0 2px; }
+.parbar span{ display:block; height:100%; width:0; background:var(--ok); }
+.parbar.over span{ background:var(--bad); }
+.stage{ outline:8px solid transparent; outline-offset:-8px; }
+.stage.par-under{ outline-color:var(--ok); }
+.stage.par-over{ outline-color:var(--bad); }
+.clock.live-over{ color:var(--bad); }
 .meter{ position:relative; height:8px; border-radius:4px; background:var(--line); overflow:hidden; margin:6px 0 4px; }
 .meter span{ position:absolute; left:0; top:0; bottom:0; width:0; background:var(--accent); }
 .meter i{ position:absolute; top:0; bottom:0; width:2px; background:var(--text); }
@@ -111,6 +118,7 @@ summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:
     <div class="clock" id="clock">0.00<small>s</small></div>
     <div class="result"><span class="zone" id="zone">&mdash;</span><span id="repLabel">No reps yet</span></div>
   </div>
+  <div class="parbar" id="parBar" title="Par time"><span id="parFill"></span></div>
   <div class="meter" id="meter" hidden title="Microphone level"><span id="meterBar"></span><i id="meterThr"></i></div>
   <div class="status" id="status"></div>
 
@@ -139,7 +147,7 @@ summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:
       <label class="field">Target height (in)<input id="sTH" type="number" min="2" max="72" step="0.5"></label>
       <label class="field">Camera latency offset (ms)<input id="sLat" type="number" min="-200" max="500" step="5"></label>
       <label class="field">Pause between reps (s)<input id="sRepeat" type="number" min="2" max="30" step="1"></label>
-      <label class="field check wide"><input id="sParBeep" type="checkbox"> Second beep at par time</label>
+      <label class="field check wide"><input id="sParBeep" type="checkbox"> Second beep at par time (the mic pauses for 0.2 s during it, so a shot right at par can be missed)</label>
       <label class="field check wide"><input id="sAuto" type="checkbox"> Start the next rep automatically</label>
     </div>
     <div class="actions">
@@ -359,7 +367,9 @@ function analyzeReps(reps, o){
   out.avg = r2(mean(core.map(r => r.t)));
   out.best = r2(Math.min.apply(null, allT));
   out.underPar = timed.filter(r => r.t <= r.par).length;
-  const placed = reps.filter(r => r.u != null && r.v != null);
+  // Placement uses on-paper hits from normal-speed reps; slow outliers are usually a missed shot plus a later sound.
+  const coreSet = new Set(core);
+  const placed = reps.filter(r => r.u != null && r.v != null && Math.abs(r.u - 0.5) <= 0.5 && Math.abs(r.v - 0.5) <= 0.5 && (r.t == null || coreSet.has(r)));
   if(placed.length){
     const xs = placed.map(r => (r.u - 0.5) * W), ys = placed.map(r => (0.5 - r.v) * H);
     out.biasX = r2(mean(xs)); out.biasY = r2(mean(ys));
@@ -407,11 +417,12 @@ function analyzeReps(reps, o){
 // ---------------------------------------------------------------------------
 // Settings and storage
 // ---------------------------------------------------------------------------
-const DEFAULTS = { mode: 'always', clickThr: 0.15, color: 'red', sens: 60, minDelay: 2, maxDelay: 5, par: 1.5, timeout: 8, targetW: 8.5, targetH: 11, latency: 0, repeatDelay: 6, parBeep: true, auto: true };
+const DEFAULTS = { mode: 'always', clickThr: 0.15, color: 'red', sens: 60, minDelay: 2, maxDelay: 5, par: 1.5, timeout: 8, targetW: 8.5, targetH: 11, latency: 0, repeatDelay: 6, parBeep: false, auto: true, ver: 2 };
 const LS_SET = 'ldt.settings', LS_HIST = 'ldt.history';
 function lsGet(k, fallback){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; }catch(e){ return fallback; } }
 function lsSet(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 const S = Object.assign({}, DEFAULTS, lsGet(LS_SET, {}));
+if((lsGet(LS_SET, {}).ver || 1) < 2){ S.parBeep = false; S.ver = 2; lsSet(LS_SET, S); }
 let history = lsGet(LS_HIST, []);
 if(!Array.isArray(history)) history = [];
 
@@ -617,14 +628,32 @@ async function keepAwake(){
 }
 function startClock(){
   cancelAnimationFrame(clockRaf);
-  const tick = () => { if(st.drill !== 'listening') return; showTime((performance.now() - st.beepAt) / 1000); clockRaf = requestAnimationFrame(tick); };
+  const tick = () => {
+    if(st.drill !== 'listening') return;
+    const e = Math.max(0, (performance.now() - st.beepAt) / 1000);
+    showTime(e); parVisual(e); clock.classList.toggle('live-over', e > S.par);
+    clockRaf = requestAnimationFrame(tick);
+  };
   clockRaf = requestAnimationFrame(tick);
 }
 function stopClock(){ cancelAnimationFrame(clockRaf); }
+const parBar = $('parBar'), parFill = $('parFill');
+function parVisual(e){
+  const over = e > S.par;
+  parFill.style.width = Math.min(100, e / S.par * 100) + '%';
+  parBar.classList.toggle('over', over);
+  stage.classList.toggle('par-under', !over);
+  stage.classList.toggle('par-over', over);
+}
+function clearPar(){
+  parFill.style.width = '0%'; parBar.classList.remove('over');
+  stage.classList.remove('par-under', 'par-over'); clock.classList.remove('live-over');
+}
 
 function startRep(){
   clearTimers();
   st.rep++; st.drill = 'standby';
+  clearPar();
   btnDrill.textContent = 'Stop';
   showTime(0); showZone('\u2014'); repLabel.textContent = 'Rep ' + st.rep;
   setStatus('Standby.');
@@ -659,7 +688,7 @@ function scheduleNext(){
   timer(startRep, S.repeatDelay * 1000);
 }
 function stopDrill(){
-  clearTimers(); stopClock();
+  clearTimers(); stopClock(); clearPar();
   if(st.drill !== 'idle'){ setStatus('Drill stopped.'); }
   st.drill = 'idle';
   btnDrill.textContent = 'Start drill';
@@ -679,6 +708,7 @@ function onShot(ts, blob, mv){
     const t = Math.max(0, (ts - st.beepAt - S.latency) / 1000);
     st.drill = 'done';
     recordRep({ t, zone: hit.zone, u: hit.u, v: hit.v, early: false, mv });
+    clock.classList.remove('live-over'); parVisual(t);
     showTime(t); showZone(hit.zone);
     if(mv != null) repLabel.textContent = 'Rep ' + st.rep + ' \u00b7 moved ' + mv.toFixed(2) + ' in';
     setStatus('Rep ' + st.rep + ': ' + fmt(t) + ' s, ' + (hit.zone === 'Hit' ? 'hit (not calibrated)' : hit.zone) + (mv != null ? ', dot moved ' + mv.toFixed(2) + ' in during the press' : '') + '.');
@@ -760,7 +790,10 @@ function onAudioEvent(e){
   }
   if(e.type !== 'click') return;
   const tp = ctxToPerf(e.t);
-  if(st.gates.some(g => tp >= g[0] && tp <= g[1])) return;   // our own beep
+  if(st.gates.some(g => tp >= g[0] && tp <= g[1])){   // our own beep
+    if(st.drill === 'listening' && e.peak >= S.clickThr) setStatus('A sound during the par beep was ignored. Turn off the par beep in Settings to avoid this.');
+    return;
+  }
   if(st.learn){ setTimeout(() => learnIfAimed(e, tp), 150); return; }
   if(S.mode !== 'always' || e.peak < S.clickThr) return;
   if(tp - st.lastClickAt < DEBOUNCE_MS) return;
@@ -789,6 +822,10 @@ function handleClick(tp){
   st.lastTrace = st.H ? st.dotBuf.filter(s => s.x != null && s.t >= tp - 400 && s.t <= tp + 40).map(s => applyH(st.H, s.x, s.y)) : [];
   if(st.drill === 'listening'){
     if(!at){ setStatus('Click heard, but no laser dot in view. Still listening.'); return; }
+    if(st.H){
+      const uv = applyH(st.H, at.x, at.y);
+      if(Math.abs(uv[0] - 0.5) > 1 || Math.abs(uv[1] - 0.5) > 1){ setStatus('Ignored a sound with the dot far off the target. Still listening.'); return; }
+    }
     onShot(tp, at, mv);
   } else if(st.drill === 'standby'){
     if(at && scoreHit(at.x, at.y).zone !== 'Miss') onShot(tp, at, mv);
