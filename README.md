@@ -20,13 +20,27 @@ Always-on mode also records **movement**: how far the dot travels in the 120 ms 
 1. Print a target on letter paper. Black ink on white paper works best.
 2. Mount the phone so the whole target plus a margin fills the camera view. Dim the room.
 3. Open the live app in Safari or Chrome and tap **Start camera**. Allow camera and microphone access.
-4. Holster, tap **Calibrate**, then tap the target's top-left, top-right, bottom-right, and bottom-left corners.
+4. Holster, tap **Calibrate**, then tap the target's top-left, top-right, bottom-right, and bottom-left corners. Drag any corner afterward to fine-tune it.
 5. Open **Settings**, tap **Learn trigger click**, hold the dot steady on the target, and dry-fire three times. Rack between presses; the app ignores rack noise.
 6. Holster and tap **Start drill**.
 7. Draw and fire on the beep. The app shows time to first shot, the zone, and the dot movement.
 8. Rack the slide and holster. The next rep starts automatically after the pause.
 
 Keep all live ammunition out of the room for every session.
+
+## Calibration
+
+Tap four corners per target, in order: top-left, top-right, bottom-right, bottom-left. After calibrating, drag any orange corner handle to adjust it; the outline updates live. The app saves the calibration and restores it the next time you open the camera at the same resolution. Tap **Recalibrate** whenever the phone moves.
+
+## Multiple targets
+
+Set **Targets** in Settings to 2–4, then calibrate each sheet in turn; the app numbers them in the order you mark them. On each rep, the start beep sounds, a voice calls the target number, and the number flashes on screen. The called target's outline turns green.
+
+- The timer starts at the beep, not the callout.
+- The mic ignores the spoken callout, for up to 0.9 s after the beep.
+- No target is called three times in a row.
+- A hit on any other target scores **Wrong target**, tracked separately from misses.
+- A shot that lands between sheets scores as a Miss.
 
 ## Scoring
 
@@ -38,9 +52,9 @@ The bar under the timer fills from the start beep to par. It is green while you 
 
 ## Analysis
 
-The **Analysis** panel summarizes **This session** or **All history**: average and best time, reps under par, zone counts, median dot movement, average vertical and horizontal offset from center, and group spread. Reps slower than 1.6 times your median are excluded from the average and called out.
+The **Analysis** panel summarizes **This session** or **All history**: average and best time, reps under par, zone counts including wrong-target hits, per-target time and hits, median dot movement, average vertical and horizontal offset from center, and group spread. Reps slower than 1.6 times your median are excluded from the average and called out.
 
-The panel also writes coaching notes for vertical or horizontal stringing, offset groups, slowing across a set, and high trigger-press movement. When par is out of reach or too easy, it suggests a new par, and **Set par** applies it.
+The panel also writes coaching notes for vertical or horizontal stringing, offset groups, slowing across a set, high trigger-press movement, slow transitions to a particular target, and wrong-target hits. When par is out of reach or too easy, it suggests a new par, and **Set par** applies it.
 
 ## Always-on mode rules
 
@@ -48,7 +62,7 @@ The panel also writes coaching notes for vertical or horizontal stringing, offse
 - Trigger learning and free shots outside a drill also require an aimed dot: visible in most frames of the last 250 ms, steady within 12 px, and on the paper once calibrated. Racking swings the dot, so rack noise is ignored.
 - Clicks during the start delay count as early shots only when the dot is on the paper, so holster noise is ignored.
 - The app ignores the microphone while its own beeps play. The par beep is off by default for this reason; the par bar and the green or red frame around the camera view show par instead.
-- During a rep, sounds with the dot more than one target width or height off the paper are ignored.
+- During a rep, sounds with the dot more than one target size outside the area spanned by your targets are ignored.
 - Calibrate with the gun holstered. Calibration resets the background model, and a dot in view at that moment becomes background.
 
 ## Hosting

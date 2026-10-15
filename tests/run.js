@@ -10,7 +10,7 @@ function block(name){
   if(!m) throw new Error('Marker block not found: ' + name);
   return m[1];
 }
-const lib = new Function(block('detector') + block('geom') + block('click') + block('aim') + block('analysis') + '\nreturn { createDetector, homographyToUnit, applyH, createClickDetector, aimCheck, analyzeReps };')();
+const lib = new Function(block('detector') + block('geom') + block('click') + block('targets') + block('aim') + block('analysis') + '\nreturn { createDetector, homographyToUnit, applyH, createClickDetector, aimCheck, analyzeReps, classifyHit, nearAnyTarget, withinTargets, pickTarget };')();
 
 let fails = 0;
 function ok(cond, msg){ console.log((cond ? 'PASS ' : 'FAIL ') + msg); if(!cond) fails++; }
@@ -169,6 +169,36 @@ const an2 = lib.analyzeReps(session2, { targetW: 8.5, targetH: 11 });
 ok(an2.outliers === 4, '4 slow reps (4.6-7.0 s) excluded from the average (got ' + an2.outliers + ')');
 ok(an2.spreadX < 3 && an2.spreadY < 3, 'off-paper rack excluded from spread (' + an2.spreadX + ' x ' + an2.spreadY + ' in)');
 ok(an2.biasY > 0.5, 'hits still sit high (' + an2.biasY + ' in)');
+
+// --- Multiple targets ---
+const T1 = lib.homographyToUnit([{ x: 20, y: 40 }, { x: 100, y: 40 }, { x: 100, y: 140 }, { x: 20, y: 140 }]);
+const T2 = lib.homographyToUnit([{ x: 200, y: 40 }, { x: 280, y: 40 }, { x: 280, y: 140 }, { x: 200, y: 140 }]);
+const HS = [T1, T2];
+let h = lib.classifyHit(HS, 1, 240, 90, 8.5, 11);
+ok(h.zone === 'A' && h.hit === 1, 'center of the called target 2 scores A (got ' + h.zone + ')');
+h = lib.classifyHit(HS, 1, 60, 90, 8.5, 11);
+ok(h.zone === 'Wrong' && h.hit === 0, 'center of target 1 when target 2 is called scores Wrong');
+ok(h.u < -0.5, 'wrong-target hit keeps coordinates relative to the called target, so analysis treats it as off-paper');
+h = lib.classifyHit(HS, 1, 150, 200, 8.5, 11);
+ok(h.zone === 'Miss' && h.hit === -1, 'a shot between the targets is a Miss');
+h = lib.classifyHit(HS, null, 60, 90, 8.5, 11);
+ok(h.zone === 'A' && h.hit === 0, 'free shot scores against whichever target it lands on');
+const CS = [[{ x: 20, y: 40 }, { x: 100, y: 40 }, { x: 100, y: 140 }, { x: 20, y: 140 }], [{ x: 200, y: 40 }, { x: 280, y: 40 }, { x: 280, y: 140 }, { x: 200, y: 140 }]];
+ok(lib.withinTargets(HS, CS, 150, 90, 1), 'a miss in the gap between two sheets is still in play');
+ok(!lib.withinTargets(HS, CS, 150, 400, 1) && !lib.withinTargets(HS, CS, 600, 90, 1), 'a dot far below or beside the targets is ignored');
+ok(!lib.withinTargets([T1], [CS[0]], 300, 90, 1), 'single target keeps the one-target-size margin');
+let seq = [], s7 = 3; const rr = () => (s7 = (s7 * 16807) % 2147483647) / 2147483647;
+for(let i = 0; i < 500; i++) seq.push(lib.pickTarget(3, seq, rr));
+let triple = false; for(let i = 2; i < seq.length; i++) if(seq[i] === seq[i - 1] && seq[i] === seq[i - 2]) triple = true;
+const counts = [0, 1, 2].map(k => seq.filter(x => x === k).length);
+ok(!triple, 'pickTarget never calls the same target three times in a row');
+ok(counts.every(c => c > 120), 'pickTarget spreads 500 calls across 3 targets (' + counts.join('/') + ')');
+ok(lib.pickTarget(1, [0, 0, 0], rr) === 0, 'one target always returns target 1');
+const multi = [[1.9,1,'A'],[2.4,2,'C'],[1.8,1,'A'],[2.6,2,'Wrong'],[1.85,1,'C'],[2.5,2,'A']].map((a, i) => ({ n: i + 1, t: a[0], target: a[1], zone: a[2], u: 0.5, v: 0.5, mv: 0.5, early: false, par: 2 }));
+const am = lib.analyzeReps(multi, { targetW: 8.5, targetH: 11 });
+ok(am.perTarget && am.perTarget.length === 2 && am.perTarget[1].avg === 2.5, 'per-target averages computed (T2 ' + (am.perTarget && am.perTarget[1].avg) + ' s)');
+ok(am.zones.Wrong === 1 && am.notes.some(x => /wrong target/.test(x)), 'wrong-target count and note');
+ok(am.notes.some(x => /Target 2 averages/.test(x)), 'slow-transition note names target 2');
 
 console.log(fails ? fails + ' test(s) failed' : 'All tests passed');
 process.exit(fails ? 1 : 0);

@@ -12,6 +12,7 @@ Live app: https://zachwithanach.github.io/laser-draw-trainer/
 | 2026-10-13 | Tap-to-calibrate ships first. ArUco auto-calibration is a later task. |
 | 2026-10-13 | History stays in localStorage until a sync target is chosen. |
 | 2026-10-14 | Host on GitHub Pages; repo public. claude.ai artifact hosting dropped because its sandbox blocks the camera. |
+| 2026-10-15 | Multiple targets use separate calibrated sheets. Callout order is beep, then spoken number; the timer starts at the beep. A hit on the wrong target is its own result. |
 | 2026-10-15 | Par cue is visual by default. The audible par beep forces a mic gate that drops shots at par. |
 | 2026-10-15 | Cartridge is always-on. Default mode detects the shot from the striker click on the microphone and reads the dot position from the camera at that instant. Pulse mode stays available. |
 
@@ -50,12 +51,23 @@ Live app: https://zachwithanach.github.io/laser-draw-trainer/
 - [x] Status message when the par-beep gate swallows a sound during a rep.
 - [x] During a rep, sounds with the dot more than one target size off the paper are ignored.
 
+## Phase 1.8: multiple targets and corner dragging (shipped)
+
+- [x] Drag any corner handle to adjust calibration; the homography updates live.
+- [x] Calibration saved per camera resolution and restored on camera start.
+- [x] 2-4 targets on separate sheets, each calibrated with four taps and numbered in order.
+- [x] Start beep, then a spoken target number (speech synthesis; short-beep fallback), with the number shown on screen and the called outline highlighted. Timer starts at the beep; the mic ignores the callout.
+- [x] Random target selection, never the same target three times in a row.
+- [x] Wrong-target result tracked separately from misses; misses between sheets still count.
+- [x] Per-target average time and hits in the Analysis panel, with slow-transition and wrong-target notes.
+
 ## Phase 2: accuracy
 
 - [ ] qa: measure audio-to-video timing skew on iPhone Safari and correct the dot lookup window.
 - [ ] qa: measure beep-to-click latency with a known reference and set a per-device default offset.
 - [ ] detection: handle `exposureMode` and `frameRate` constraints on Android Chrome.
 - [ ] calibration: ArUco markers on a printable target for automatic calibration.
+- [ ] drills: optional callout before the beep, for practicing target recognition separately from transitions.
 - [ ] calibration: printable target PDF with corner markers and zone rings.
 - [ ] drills: par-time ladder (auto-tighten par after three consecutive hits under par). The analysis panel already suggests par per set.
 - [ ] qa: record real clips from a phone and add them as regression fixtures.
