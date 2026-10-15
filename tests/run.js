@@ -10,7 +10,7 @@ function block(name){
   if(!m) throw new Error('Marker block not found: ' + name);
   return m[1];
 }
-const lib = new Function(block('detector') + block('geom') + '\nreturn { createDetector, homographyToUnit, applyH };')();
+const lib = new Function(block('detector') + block('geom') + block('click') + '\nreturn { createDetector, homographyToUnit, applyH, createClickDetector };')();
 
 let fails = 0;
 function ok(cond, msg){ console.log((cond ? 'PASS ' : 'FAIL ') + msg); if(!cond) fails++; }
@@ -46,22 +46,22 @@ let res;
 for(let i = 0; i < 20; i++) res = det.run(frame(scene), { sens: 60, color: 'red' });
 ok(res.blob === null && !res.flooded, 'warm-up: static scene with red ink does not trigger');
 
-res = det.run(frame(withDot(scene, 32, 24, 2.5, RED_CORE, RED_FRINGE)), { sens: 60, color: 'red', freeze: false });
+res = det.run(frame(withDot(scene, 32, 24, 2.5, RED_CORE, RED_FRINGE)), { sens: 60, color: 'red' });
 ok(near(res.blob, 32.5, 24.5), 'red dot on the black bull detected at ' + at(res.blob));
 
-res = det.run(frame(withDot(scene, 45, 12, 2.5, RED_CORE, RED_FRINGE)), { sens: 60, color: 'red', freeze: true });
+res = det.run(frame(withDot(scene, 45, 12, 2.5, RED_CORE, RED_FRINGE)), { sens: 60, color: 'red' });
 ok(near(res.blob, 45.5, 12.5), 'red dot on white paper detected at ' + at(res.blob));
 
-res = det.run(frame(withDot(scene, 4, 4, 2.5, RED_CORE, RED_FRINGE)), { sens: 60, color: 'red', freeze: true });
+res = det.run(frame(withDot(scene, 4, 4, 2.5, RED_CORE, RED_FRINGE)), { sens: 60, color: 'red' });
 ok(near(res.blob, 4.5, 4.5), 'red dot on the dark wall (a miss) detected at ' + at(res.blob));
 
 res = det.run(frame(scene), { sens: 60, color: 'red' });
 ok(res.blob === null, 'dot off returns null');
 
-res = det.run(frame(withDot(scene, 32, 24, 2.5, GREEN_CORE, GREEN_FRINGE)), { sens: 60, color: 'red', freeze: false });
+res = det.run(frame(withDot(scene, 32, 24, 2.5, GREEN_CORE, GREEN_FRINGE)), { sens: 60, color: 'red' });
 ok(res.blob === null, 'green dot ignored in red mode');
 
-res = det.run(frame(withDot(scene, 32, 24, 2.5, GREEN_CORE, GREEN_FRINGE)), { sens: 60, color: 'any', freeze: false });
+res = det.run(frame(withDot(scene, 32, 24, 2.5, GREEN_CORE, GREEN_FRINGE)), { sens: 60, color: 'any' });
 ok(near(res.blob, 32.5, 24.5), 'green dot detected in either mode at ' + at(res.blob));
 
 res = det.run(frame(() => [255, 255, 255]), { sens: 60, color: 'red' });
@@ -85,6 +85,48 @@ if(Hm){
   ok(mid[0] > 0.3 && mid[0] < 0.7 && mid[1] > 0.3 && mid[1] < 0.7, 'interior point maps near the target centre (' + mid[0].toFixed(2) + ', ' + mid[1].toFixed(2) + ')');
 }
 ok(lib.homographyToUnit([{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 2 }, { x: 3, y: 3 }]) === null, 'collinear taps are rejected');
+
+// --- Always-on laser: a dot held for 2 s at 30 fps stays detected and tracks movement ---
+const det3 = lib.createDetector(W, H);
+for(let i = 0; i < 20; i++) det3.run(frame(scene), { sens: 60, color: 'red' });
+let held = 0, last = null;
+for(let i = 0; i < 60; i++){
+  const cx = 30 + (i % 2);   // small wobble
+  last = det3.run(frame(withDot(scene, cx, 24, 2.5, RED_CORE, RED_FRINGE)), { sens: 60, color: 'red' });
+  if(last.blob) held++;
+}
+ok(held === 60, 'always-on dot detected in all 60 frames (' + held + '/60), not absorbed into the background');
+last = det3.run(frame(withDot(scene, 44, 30, 2.5, RED_CORE, RED_FRINGE)), { sens: 60, color: 'red' });
+ok(near(last.blob, 44.5, 30.5), 'dot tracked after moving at ' + at(last.blob));
+last = det3.run(frame(scene), { sens: 60, color: 'red' });
+ok(last.blob === null, 'no ghost dot left behind after the laser leaves');
+
+// --- Trigger-click detection ---
+const SR = 48000;
+let seed = 7; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648 - 0.5;
+function audio(seconds, clicks, tone){
+  const a = new Float32Array(Math.round(SR * seconds));
+  for(let i = 0; i < a.length; i++) a[i] = rnd() * 0.01;
+  (clicks || []).forEach(c => { const s0 = Math.round(c.at * SR); for(let j = 0; j < SR * 0.004 && s0 + j < a.length; j++) a[s0 + j] += c.amp * Math.exp(-j / (SR * 0.0008)) * (j % 2 ? -1 : 1); });
+  if(tone){ const s0 = Math.round(tone.at * SR); for(let j = 0; j < tone.len * SR && s0 + j < a.length; j++) a[s0 + j] += tone.amp * Math.min(1, j / (SR * 0.05)) * Math.sin(2 * Math.PI * 300 * j / SR); }
+  return a;
+}
+function runClicks(a){
+  const proc = lib.createClickDetector(SR), out = [];
+  for(let i = 0; i < a.length; i += 128) proc(a.subarray(i, i + 128), i / SR, out);
+  return out.filter(e => e.type === 'click');
+}
+let ev = runClicks(audio(2, []));
+ok(ev.length === 0, 'room noise alone produces no clicks');
+ev = runClicks(audio(2, [{ at: 0.8, amp: 0.6 }]));
+ok(ev.length === 1 && Math.abs(ev[0].t - 0.8) < 0.001, 'striker click detected, onset error ' + (ev[0] ? ((ev[0].t - 0.8) * 1000).toFixed(2) + ' ms' : 'n/a'));
+ok(ev.length === 1 && ev[0].peak > 0.3, 'click peak reported (' + (ev[0] ? ev[0].peak.toFixed(2) : 'n/a') + ') for threshold learning');
+ev = runClicks(audio(2, [{ at: 0.5, amp: 0.6 }, { at: 0.52, amp: 0.4 }]));
+ok(ev.length === 1, 'click with an echo 20 ms later counts once');
+ev = runClicks(audio(2, [{ at: 0.4, amp: 0.6 }, { at: 1.2, amp: 0.5 }]));
+ok(ev.length === 2, 'two clicks 0.8 s apart both detected');
+ev = runClicks(audio(2, [], { at: 0.5, amp: 0.05, len: 1 }));
+ok(ev.every(e => e.peak < 0.15), 'soft sustained sound stays below the default 0.15 shot threshold');
 
 console.log(fails ? fails + ' test(s) failed' : 'All tests passed');
 process.exit(fails ? 1 : 0);

@@ -2,7 +2,7 @@
 name: detection
 description: Owns laser pulse detection in index.html. Use for false positives, missed pulses, sensitivity, background model, or blob extraction changes.
 ---
-You own `createDetector` in `index.html`, between the `// @ldt-detector-start` and `// @ldt-detector-end` markers.
+You own `createDetector` (`@ldt-detector` markers), `createClickDetector` (`@ldt-click` markers), and the shot-resolution functions `onAudioEvent`, `handleClick`, and `dotAt` in `index.html`.
 
 Rules:
 - Keep the function pure. No DOM, no globals. Input is RGBA pixel data plus options; output is `{ blob, flooded }`.
