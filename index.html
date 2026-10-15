@@ -50,6 +50,9 @@ h1{ font-family:var(--display); font-weight:700; font-size:28px; margin:0; lette
 .clock.over{ color:var(--bad); }
 .result{ text-align:right; font-family:var(--display); font-weight:500; font-size:20px; line-height:1.1; color:var(--muted); }
 .result .zone{ display:block; font-size:40px; font-weight:700; color:var(--text); }
+.meter{ position:relative; height:8px; border-radius:4px; background:var(--line); overflow:hidden; margin:6px 0 4px; }
+.meter span{ position:absolute; left:0; top:0; bottom:0; width:0; background:var(--accent); }
+.meter i{ position:absolute; top:0; bottom:0; width:2px; background:var(--text); }
 .status{ min-height:22px; color:var(--muted); font-size:15px; }
 .controls{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin:12px 0; }
 button{ font:inherit; font-family:var(--display); font-weight:600; font-size:19px; letter-spacing:.01em; padding:12px 8px; border-radius:8px; border:1px solid var(--line); background:var(--surface); color:var(--text); cursor:pointer; min-height:48px; }
@@ -99,6 +102,7 @@ summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:
     <div class="clock" id="clock">0.00<small>s</small></div>
     <div class="result"><span class="zone" id="zone">&mdash;</span><span id="repLabel">No reps yet</span></div>
   </div>
+  <div class="meter" id="meter" hidden title="Microphone level"><span id="meterBar"></span><i id="meterThr"></i></div>
   <div class="status" id="status"></div>
 
   <div class="controls">
@@ -110,6 +114,10 @@ summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:
   <details id="settings">
     <summary>Settings</summary>
     <div class="grid">
+      <label class="field wide">Laser type
+        <select id="sMode"><option value="always">Always on (shot = trigger click)</option><option value="pulse">Pulse (fires on trigger)</option></select>
+      </label>
+      <label class="field">Click threshold (0.01 to 1)<input id="sClick" type="number" min="0.01" max="1" step="0.01"></label>
       <label class="field">Laser color
         <select id="sColor"><option value="red">Red</option><option value="green">Green</option><option value="any">Either</option></select>
       </label>
@@ -126,6 +134,7 @@ summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:
       <label class="field check wide"><input id="sAuto" type="checkbox"> Start the next rep automatically</label>
     </div>
     <div class="actions">
+      <button class="quiet" id="btnLearn">Learn trigger click</button>
       <button class="quiet" id="btnBeep">Test beep</button>
       <button class="quiet" id="btnReset">Reset settings</button>
     </div>
@@ -154,12 +163,15 @@ function createDetector(W, H){
   const n = W * H;
   const bgM = new Float32Array(n);   // background: brightest channel per pixel
   const bgS = new Float32Array(n);   // background: laser-color dominance per pixel
+  const curM = new Uint8Array(n), curS = new Uint8Array(n);
   const mask = new Uint8Array(n);
   const stack = new Int32Array(n);
   const WARM = 15;
   let frames = 0;
 
-  // d: RGBA pixel data. o: { sens 0-100, color 'red'|'green'|'any', freeze bool }
+  // d: RGBA pixel data. o: { sens 0-100, color 'red'|'green'|'any' }
+  // Candidate pixels are excluded from the background update, so a dot that stays on
+  // (always-on laser) is never absorbed into the background.
   function run(d, o){
     const sens = o.sens == null ? 60 : o.sens;
     const minBright = Math.round(250 - sens * 1.2);
@@ -169,9 +181,8 @@ function createDetector(W, H){
     const maxCand = Math.floor(n * 0.04);
     const warm = frames < WARM;
     const alpha = warm ? 0.5 : 0.06;
-    const freeze = !!o.freeze && !warm;
     mask.fill(0);
-    let count = 0, flooded = false;
+    let count = 0;
 
     for(let i = 0, p = 0; i < n; i++, p += 4){
       const r = d[p], g = d[p + 1], b = d[p + 2];
@@ -179,15 +190,16 @@ function createDetector(W, H){
       let s = 0;
       if(wantRed){ const t = r - (g > b ? g : b); if(t > s) s = t; }
       if(wantGreen){ const t = g - (r > b ? r : b); if(t > s) s = t; }
-      const pm = bgM[i], ps = bgS[i];
-      if(!freeze){ bgM[i] = pm + (m - pm) * alpha; bgS[i] = ps + (s - ps) * alpha; }
+      curM[i] = m; curS[i] = s;
       if(warm) continue;
       let c = 0;
-      if(s >= dom && m >= minBright && s - ps >= diffT) c = 1;           // colored fringe
-      else if(r > 235 && g > 235 && b > 235 && m - pm >= diffT) c = 2;  // blown-out core
-      if(!c) continue;
-      mask[i] = c;
-      if(++count > maxCand){ flooded = true; break; }
+      if(s >= dom && m >= minBright && s - bgS[i] >= diffT) c = 1;            // colored fringe
+      else if(r > 235 && g > 235 && b > 235 && m - bgM[i] >= diffT) c = 2;   // blown-out core
+      if(c){ mask[i] = c; count++; }
+    }
+    const flooded = !warm && count > maxCand;
+    for(let i = 0; i < n; i++){
+      if(warm || flooded || !mask[i]){ bgM[i] += (curM[i] - bgM[i]) * alpha; bgS[i] += (curS[i] - bgS[i]) * alpha; }
     }
     frames++;
     if(warm || flooded || count === 0) return { blob: null, flooded };
@@ -255,9 +267,37 @@ function applyH(h, x, y){
 // @ldt-geom-end
 
 // ---------------------------------------------------------------------------
+// Trigger-click detection. Pure; runs inside an AudioWorklet via toString().
+// Emits {type:'click', t, peak, floor} at each impulsive onset and
+// {type:'level', v, floor} every 50 ms for the meter.
+// ---------------------------------------------------------------------------
+// @ldt-click-start
+function createClickDetector(sampleRate){
+  let env = 0.001, hold = 0, t = 0, peak = 0, lvl = 0, lvlN = 0;
+  const holdN = Math.round(sampleRate * 0.05);
+  const lvlEvery = Math.round(sampleRate * 0.05);
+  const k = 1 / (sampleRate * 0.25);
+  return function process(ch, startTime, out){
+    for(let i = 0; i < ch.length; i++){
+      const a = ch[i] < 0 ? -ch[i] : ch[i];
+      if(a > lvl) lvl = a;
+      if(++lvlN >= lvlEvery){ out.push({ type: 'level', v: lvl, floor: env }); lvl = 0; lvlN = 0; }
+      if(hold > 0){
+        if(a > peak) peak = a;
+        if(--hold === 0) out.push({ type: 'click', t: t, peak: peak, floor: env });
+        continue;
+      }
+      env += (a - env) * k;
+      if(a > 0.02 && a > env * 8){ t = startTime + i / sampleRate; peak = a; hold = holdN; }
+    }
+  };
+}
+// @ldt-click-end
+
+// ---------------------------------------------------------------------------
 // Settings and storage
 // ---------------------------------------------------------------------------
-const DEFAULTS = { color: 'red', sens: 60, minDelay: 2, maxDelay: 5, par: 1.5, timeout: 8, targetW: 8.5, targetH: 11, latency: 0, repeatDelay: 6, parBeep: true, auto: true };
+const DEFAULTS = { mode: 'always', clickThr: 0.15, color: 'red', sens: 60, minDelay: 2, maxDelay: 5, par: 1.5, timeout: 8, targetW: 8.5, targetH: 11, latency: 0, repeatDelay: 6, parBeep: true, auto: true };
 const LS_SET = 'ldt.settings', LS_HIST = 'ldt.history';
 function lsGet(k, fallback){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; }catch(e){ return fallback; } }
 function lsSet(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
@@ -269,13 +309,14 @@ const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), hint = $('hint'), pill = $('pill'), clock = $('clock');
 const zoneEl = $('zone'), repLabel = $('repLabel'), statusEl = $('status');
 const btnCam = $('btnCam'), btnCal = $('btnCal'), btnDrill = $('btnDrill'), btnBeep = $('btnBeep');
+const btnLearn = $('btnLearn'), meter = $('meter'), meterBar = $('meterBar'), meterThr = $('meterThr');
 const btnReset = $('btnReset'), btnCopy = $('btnCopy'), btnClear = $('btnClear');
 const map = $('map'), statsEl = $('stats'), histEl = $('history'), stage = $('stage');
 const octx = overlay.getContext('2d');
 const work = document.createElement('canvas');
 const wctx = work.getContext('2d', { willReadFrequently: true });
 
-const fields = { color: 'sColor', sens: 'sSens', minDelay: 'sMin', maxDelay: 'sMax', par: 'sPar', timeout: 'sTimeout', targetW: 'sTW', targetH: 'sTH', latency: 'sLat', repeatDelay: 'sRepeat', parBeep: 'sParBeep', auto: 'sAuto' };
+const fields = { mode: 'sMode', clickThr: 'sClick', color: 'sColor', sens: 'sSens', minDelay: 'sMin', maxDelay: 'sMax', par: 'sPar', timeout: 'sTimeout', targetW: 'sTW', targetH: 'sTH', latency: 'sLat', repeatDelay: 'sRepeat', parBeep: 'sParBeep', auto: 'sAuto' };
 function loadFields(){
   for(const k in fields){ const el = $(fields[k]); if(el.type === 'checkbox') el.checked = !!S[k]; else el.value = S[k]; }
 }
@@ -293,10 +334,11 @@ loadFields();
 // ---------------------------------------------------------------------------
 // Runtime state
 // ---------------------------------------------------------------------------
-const DEBOUNCE_MS = 150, HOLD_MS = 500;
+const DEBOUNCE_MS = 150;
 let W = 320, H = 240, det = null, srcW = 0, srcH = 0;
 const st = { camOn: false, dotOn: false, dotSince: 0, dot: null, lastShotAt: -1e9, lastHit: null, lastHitAt: 0, flooded: false,
-  calibrating: false, corners: [], H: null, drill: 'idle', rep: 0, beepAt: 0, timers: [], session: [] };
+  calibrating: false, corners: [], H: null, drill: 'idle', rep: 0, beepAt: 0, timers: [], session: [],
+  dotBuf: [], lastClickAt: -1e9, gates: [], learn: null, mic: null, lastTrace: [] };
 
 const fmt = t => t.toFixed(2);
 function setStatus(msg){ statusEl.textContent = msg; }
@@ -328,6 +370,7 @@ async function startCamera(){
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
     setStatus('This browser cannot open the camera. Open the page in Safari or Chrome.'); return;
   }
+  ensureAudio();
   btnCam.disabled = true; setStatus('Opening camera.');
   try{
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -341,11 +384,12 @@ async function startCamera(){
     st.camOn = true;
     btnCam.textContent = 'Stop camera'; btnCal.disabled = false; btnDrill.disabled = false;
     const s = stream.getVideoTracks()[0].getSettings();
-    pill.textContent = (s.width || '?') + 'x' + (s.height || '?') + (s.frameRate ? ' at ' + Math.round(s.frameRate) + ' fps' : '');
-    pill.classList.add('on');
-    hint.textContent = 'Tap Calibrate, then tap the four corners of the target.';
+    pill.dataset.base = (s.width || '?') + 'x' + (s.height || '?') + (s.frameRate ? ' at ' + Math.round(s.frameRate) + ' fps' : '');
+    updatePill(); pill.classList.add('on');
+    hint.textContent = 'Holster, tap Calibrate, then tap the four corners of the target.';
     setStatus('');
     loop();
+    if(S.mode === 'always') await startMic();
   }catch(err){
     setStatus('Camera failed: ' + err.name + '. Allow camera access and try again.');
   }
@@ -356,6 +400,7 @@ function stopCamera(){
   const s = video.srcObject; if(s) s.getTracks().forEach(t => t.stop());
   video.srcObject = null;
   stopDrill();
+  stopMic();
   btnCam.textContent = 'Start camera'; btnCal.disabled = true; btnDrill.disabled = true;
   pill.textContent = 'Camera off'; pill.classList.remove('on');
   octx.clearRect(0, 0, W, H);
@@ -377,13 +422,14 @@ function processFrame(ts){
   if(!det) return;
   wctx.drawImage(video, 0, 0, W, H);
   const d = wctx.getImageData(0, 0, W, H).data;
-  const freeze = st.dotOn && (ts - st.dotSince) < HOLD_MS;
-  const res = det.run(d, { sens: S.sens, color: S.color, freeze });
+  const res = det.run(d, { sens: S.sens, color: S.color });
   st.flooded = res.flooded;
+  st.dotBuf.push({ t: ts, x: res.blob ? res.blob.x : null, y: res.blob ? res.blob.y : null });
+  while(st.dotBuf.length && st.dotBuf[0].t < ts - 2000) st.dotBuf.shift();
   if(res.blob){
     if(!st.dotOn){
       st.dotOn = true; st.dotSince = ts;
-      if(ts - st.lastShotAt >= DEBOUNCE_MS){ st.lastShotAt = ts; onShot(ts, res.blob); }
+      if(S.mode === 'pulse' && ts - st.lastShotAt >= DEBOUNCE_MS){ st.lastShotAt = ts; onShot(ts, res.blob, null); }
     }
     st.dot = res.blob;
   } else { st.dotOn = false; st.dot = null; }
@@ -395,6 +441,7 @@ function processFrame(ts){
 // ---------------------------------------------------------------------------
 btnCal.addEventListener('click', () => {
   st.calibrating = true; st.corners = []; st.H = null;
+  if(det) det = createDetector(W, H);
   hint.textContent = 'Tap the top-left corner of the target.';
   setStatus('');
 });
@@ -431,9 +478,16 @@ function ensureAudio(){
   if(!actx){ const AC = window.AudioContext || window.webkitAudioContext; if(AC) actx = new AC(); }
   if(actx && actx.state === 'suspended') actx.resume();
 }
-// Returns the lead time in ms from now until the tone actually sounds.
+// Context time -> performance.now() time base.
+function ctxToPerf(ct){
+  if(!actx) return performance.now();
+  const ts = actx.getOutputTimestamp ? actx.getOutputTimestamp() : null;
+  if(ts && ts.performanceTime) return ts.performanceTime + (ct - ts.contextTime) * 1000;
+  return performance.now() - (actx.currentTime - ct) * 1000;
+}
+// Schedules a tone and returns the performance.now() time it sounds.
 function beep(freq, dur){
-  ensureAudio(); if(!actx) return 0;
+  ensureAudio(); if(!actx) return performance.now();
   const t0 = actx.currentTime + 0.02;
   const o = actx.createOscillator(), g = actx.createGain();
   o.type = 'square'; o.frequency.value = freq;
@@ -443,7 +497,10 @@ function beep(freq, dur){
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   o.connect(g).connect(actx.destination);
   o.start(t0); o.stop(t0 + dur + 0.02);
-  return 20 + ((actx.baseLatency || 0) + (actx.outputLatency || 0)) * 1000;
+  const at = ctxToPerf(t0);
+  st.gates.push([at - 30, at + dur * 1000 + 120]);
+  if(st.gates.length > 20) st.gates.shift();
+  return at;
 }
 async function keepAwake(){
   try{ if('wakeLock' in navigator && !wakeLock){ wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } }catch(e){}
@@ -463,8 +520,8 @@ function startRep(){
   setStatus('Standby.');
   const delay = (S.minDelay + Math.random() * Math.max(0, S.maxDelay - S.minDelay)) * 1000;
   timer(() => {
-    const lead = beep(1800, 0.12);
-    st.beepAt = performance.now() + lead;
+    st.beepAt = beep(1800, 0.12);
+    const lead = Math.max(0, st.beepAt - performance.now());
     st.drill = 'listening';
     setStatus('Go.');
     startClock();
@@ -503,30 +560,155 @@ btnDrill.addEventListener('click', () => {
 });
 btnBeep.addEventListener('click', () => beep(1800, 0.12));
 
-function onShot(ts, blob){
+function onShot(ts, blob, mv){
   const hit = scoreHit(blob.x, blob.y);
-  st.lastHit = { px: blob.x, py: blob.y, u: hit.u, v: hit.v, zone: hit.zone }; st.lastHitAt = ts;
+  st.lastHit = { px: blob.x, py: blob.y, u: hit.u, v: hit.v, zone: hit.zone }; st.lastHitAt = performance.now();
+  st.lastMv = mv;
   if(st.drill === 'listening'){
     clearTimers(); stopClock();
     const t = Math.max(0, (ts - st.beepAt - S.latency) / 1000);
     st.drill = 'done';
-    recordRep({ t, zone: hit.zone, u: hit.u, v: hit.v, early: false });
+    recordRep({ t, zone: hit.zone, u: hit.u, v: hit.v, early: false, mv });
     showTime(t); showZone(hit.zone);
-    setStatus('Rep ' + st.rep + ': ' + fmt(t) + ' s, ' + (hit.zone === 'Hit' ? 'hit (not calibrated)' : hit.zone) + '.');
+    if(mv != null) repLabel.textContent = 'Rep ' + st.rep + ' \u00b7 moved ' + mv.toFixed(2) + ' in';
+    setStatus('Rep ' + st.rep + ': ' + fmt(t) + ' s, ' + (hit.zone === 'Hit' ? 'hit (not calibrated)' : hit.zone) + (mv != null ? ', dot moved ' + mv.toFixed(2) + ' in during the press' : '') + '.');
     if(S.auto) scheduleNext(); else btnDrill.textContent = 'Start drill';
   } else if(st.drill === 'standby'){
     clearTimers(); stopClock();
     st.drill = 'done';
-    recordRep({ t: null, zone: hit.zone, u: hit.u, v: hit.v, early: true });
+    recordRep({ t: null, zone: hit.zone, u: hit.u, v: hit.v, early: true, mv });
     showZone('Early');
     setStatus('Rep ' + st.rep + ': shot before the beep.');
     if(S.auto) scheduleNext(); else btnDrill.textContent = 'Start drill';
   } else {
     showZone(hit.zone);
-    setStatus('Free shot: ' + (hit.zone === 'Hit' ? 'hit (calibrate for zones)' : hit.zone) + '.');
+    if(mv != null) repLabel.textContent = 'Moved ' + mv.toFixed(2) + ' in';
+    setStatus('Free shot: ' + (hit.zone === 'Hit' ? 'hit (calibrate for zones)' : hit.zone) + (mv != null ? ', dot moved ' + mv.toFixed(2) + ' in during the press' : '') + '.');
   }
   drawMap();
 }
+
+// ---------------------------------------------------------------------------
+// Microphone: trigger-click shots for always-on lasers
+// ---------------------------------------------------------------------------
+function updatePill(){
+  if(!st.camOn && !pill.dataset.base) return;
+  pill.textContent = (pill.dataset.base || '') + (st.mic ? ' \u00b7 mic on' : '');
+}
+async function startMic(){
+  if(st.mic) return true;
+  ensureAudio();
+  if(!actx){ setStatus('Audio is unavailable in this browser.'); return false; }
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    const src = actx.createMediaStreamSource(stream);
+    const hp = actx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1500;
+    const sink = actx.createGain(); sink.gain.value = 0;
+    let node;
+    if(actx.audioWorklet){
+      const code = createClickDetector.toString() + `
+class LdtClick extends AudioWorkletProcessor{
+  constructor(){ super(); this.p = createClickDetector(sampleRate); this.out = []; }
+  process(inputs){
+    const ch = inputs[0] && inputs[0][0];
+    if(ch){ this.p(ch, currentTime, this.out); if(this.out.length){ for(const e of this.out) this.port.postMessage(e); this.out.length = 0; } }
+    return true;
+  }
+}
+registerProcessor('ldt-click', LdtClick);`;
+      const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+      await actx.audioWorklet.addModule(url);
+      URL.revokeObjectURL(url);
+      node = new AudioWorkletNode(actx, 'ldt-click');
+      node.port.onmessage = e => onAudioEvent(e.data);
+    } else {
+      const proc = createClickDetector(actx.sampleRate), out = [];
+      node = actx.createScriptProcessor(1024, 1, 1);
+      node.onaudioprocess = e => { proc(e.inputBuffer.getChannelData(0), e.playbackTime || actx.currentTime, out); out.forEach(onAudioEvent); out.length = 0; };
+    }
+    src.connect(hp).connect(node).connect(sink).connect(actx.destination);
+    st.mic = { stream, src, hp, node, sink };
+    meter.hidden = false; updatePill();
+    return true;
+  }catch(err){
+    setStatus('Microphone failed: ' + err.name + '. Allow microphone access; always-on lasers need it to hear the trigger click.');
+    return false;
+  }
+}
+function stopMic(){
+  if(!st.mic) return;
+  try{ st.mic.src.disconnect(); st.mic.node.disconnect(); }catch(e){}
+  st.mic.stream.getTracks().forEach(t => t.stop());
+  st.mic = null; meter.hidden = true; updatePill();
+}
+const meterPct = v => Math.min(100, Math.sqrt(Math.max(0, v)) * 100);
+function onAudioEvent(e){
+  if(e.type === 'level'){
+    meterBar.style.width = meterPct(e.v) + '%';
+    meterThr.style.left = meterPct(S.clickThr) + '%';
+    return;
+  }
+  if(e.type !== 'click') return;
+  const tp = ctxToPerf(e.t);
+  if(st.gates.some(g => tp >= g[0] && tp <= g[1])) return;   // our own beep
+  if(st.learn){ learnClick(e); return; }
+  if(S.mode !== 'always' || e.peak < S.clickThr) return;
+  if(tp - st.lastClickAt < DEBOUNCE_MS) return;
+  st.lastClickAt = tp;
+  // Wait for the camera frames around the click to arrive, then resolve the dot.
+  setTimeout(() => handleClick(tp), 150);
+}
+function dotAt(tp, lo, hi){
+  let best = null, bd = 1e9;
+  for(const s of st.dotBuf){
+    if(s.x == null || s.t < tp + lo || s.t > tp + hi) continue;
+    const dd = Math.abs(s.t - tp);
+    if(dd < bd){ bd = dd; best = s; }
+  }
+  return best;
+}
+function inches(a, b){
+  if(!st.H) return null;
+  const p = applyH(st.H, a.x, a.y), q = applyH(st.H, b.x, b.y);
+  return Math.hypot((p[0] - q[0]) * S.targetW, (p[1] - q[1]) * S.targetH);
+}
+function handleClick(tp){
+  const at = dotAt(tp, -120, 40);
+  const before = dotAt(tp - 120, -100, 50);
+  const mv = (at && before) ? inches(before, at) : null;
+  st.lastTrace = st.H ? st.dotBuf.filter(s => s.x != null && s.t >= tp - 400 && s.t <= tp + 40).map(s => applyH(st.H, s.x, s.y)) : [];
+  if(st.drill === 'listening'){
+    if(!at){ setStatus('Click heard, but no laser dot in view. Still listening.'); return; }
+    onShot(tp, at, mv);
+  } else if(st.drill === 'standby'){
+    if(at && scoreHit(at.x, at.y).zone !== 'Miss') onShot(tp, at, mv);
+  } else if(st.drill === 'idle'){
+    if(at) onShot(tp, at, mv);
+    else setStatus('Click heard, but no laser dot in view.');
+  }
+}
+function learnClick(e){
+  st.learn.peaks.push(e.peak);
+  const n = st.learn.peaks.length;
+  if(n < 3){ setStatus('Heard click ' + n + ' of 3 (level ' + e.peak.toFixed(2) + '). Rack and dry-fire again.'); return; }
+  const lo = Math.min.apply(null, st.learn.peaks);
+  S.clickThr = Math.max(0.03, Math.min(0.9, Math.round(lo * 0.5 * 100) / 100));
+  lsSet(LS_SET, S); loadFields();
+  st.learn = null; btnLearn.textContent = 'Learn trigger click';
+  setStatus('Click threshold set to ' + S.clickThr.toFixed(2) + '. Louder sounds than half your quietest click count as shots.');
+}
+btnLearn.addEventListener('click', async () => {
+  if(st.learn){ st.learn = null; btnLearn.textContent = 'Learn trigger click'; setStatus('Click learning cancelled.'); return; }
+  if(st.drill !== 'idle') stopDrill();
+  if(!(await startMic())) return;
+  st.learn = { peaks: [] };
+  btnLearn.textContent = 'Cancel learning';
+  setStatus('Dry-fire 3 times with the phone where it sits for drills. Rack between presses.');
+});
+$('sMode').addEventListener('change', async () => {
+  if(S.mode === 'always' && st.camOn) await startMic();
+  if(S.mode === 'pulse') stopMic();
+});
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -559,6 +741,11 @@ function drawMap(){
   const sx = mw / S.targetW, cx = mw / 2, cy = mh / 2;
   c.beginPath(); c.arc(cx, cy, zoneC() * sx, 0, Math.PI * 2); c.stroke();
   c.fillStyle = '#15191b'; c.beginPath(); c.arc(cx, cy, zoneA() * sx, 0, Math.PI * 2); c.fill();
+  if(st.lastTrace && st.lastTrace.length > 1){
+    c.strokeStyle = 'rgba(21,25,27,.55)'; c.lineWidth = 1.5; c.beginPath();
+    st.lastTrace.forEach((p, i) => { const x = p[0] * mw, y = p[1] * mh; if(i) c.lineTo(x, y); else c.moveTo(x, y); });
+    c.stroke();
+  }
   const pts = st.session.filter(r => r.u != null).slice(-30);
   pts.forEach(r => { c.fillStyle = 'rgba(228,99,26,.6)'; c.beginPath(); c.arc(r.u * mw, r.v * mh, 3.5, 0, Math.PI * 2); c.fill(); });
   if(st.lastHit && st.lastHit.u != null){
@@ -571,7 +758,7 @@ function drawMap(){
 // Session log
 // ---------------------------------------------------------------------------
 function recordRep(r){
-  const rep = { n: st.rep, t: r.t, zone: r.zone, u: r.u, v: r.v, early: !!r.early, par: S.par, at: new Date().toISOString() };
+  const rep = { n: st.rep, t: r.t, zone: r.zone, u: r.u, v: r.v, early: !!r.early, mv: r.mv == null ? null : Math.round(r.mv * 100) / 100, par: S.par, mode: S.mode, at: new Date().toISOString() };
   st.session.push(rep);
   history.push(rep);
   if(history.length > 500) history = history.slice(-500);
@@ -584,17 +771,19 @@ function renderStats(){
   const avg = timed.length ? timed.reduce((a, r) => a + r.t, 0) / timed.length : null;
   const best = timed.length ? Math.min.apply(null, timed.map(r => r.t)) : null;
   const under = timed.filter(r => r.t <= r.par).length;
+  const moved = reps.filter(r => r.mv != null);
+  const avgMv = moved.length ? moved.reduce((a, r) => a + r.mv, 0) / moved.length : null;
   const row = (k, v) => '<div class="row"><span>' + k + '</span><b>' + v + '</b></div>';
   statsEl.innerHTML = reps.length
     ? row('Reps', reps.length) + row('Average', avg != null ? fmt(avg) + ' s' : '\u2014') + row('Best', best != null ? fmt(best) + ' s' : '\u2014')
-      + row('Under par', timed.length ? under + ' of ' + timed.length : '\u2014') + row('Hits', hits.length + ' of ' + reps.length)
+      + row('Under par', timed.length ? under + ' of ' + timed.length : '\u2014') + row('Hits', hits.length + ' of ' + reps.length) + (avgMv != null ? row('Avg movement', avgMv.toFixed(2) + ' in') : '')
     : '<div class="empty">Session stats appear here after the first rep.</div>';
   const recent = history.slice(-20).reverse();
   histEl.innerHTML = recent.length
-    ? '<table><tr><th>Time</th><th>Zone</th><th>Par</th><th>When</th></tr>' + recent.map(r => {
+    ? '<table><tr><th>Time</th><th>Zone</th><th>Move</th><th>When</th></tr>' + recent.map(r => {
         const when = new Date(r.at);
         const t = r.early ? 'Early' : (r.t == null ? '\u2014' : fmt(r.t) + ' s');
-        return '<tr><td class="t">' + t + '</td><td>' + r.zone + '</td><td>' + fmt(r.par) + ' s</td><td>' + when.toLocaleDateString() + ' ' + when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '</td></tr>';
+        return '<tr><td class="t">' + t + '</td><td>' + r.zone + '</td><td>' + (r.mv != null ? r.mv.toFixed(2) + ' in' : '\u2014') + '</td><td>' + when.toLocaleDateString() + ' ' + when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '</td></tr>';
       }).join('') + '</table>'
     : '';
 }
