@@ -10,7 +10,7 @@ function block(name){
   if(!m) throw new Error('Marker block not found: ' + name);
   return m[1];
 }
-const lib = new Function(block('detector') + block('geom') + block('click') + block('aim') + '\nreturn { createDetector, homographyToUnit, applyH, createClickDetector, aimCheck };')();
+const lib = new Function(block('detector') + block('geom') + block('click') + block('aim') + block('analysis') + '\nreturn { createDetector, homographyToUnit, applyH, createClickDetector, aimCheck, analyzeReps };')();
 
 let fails = 0;
 function ok(cond, msg){ console.log((cond ? 'PASS ' : 'FAIL ') + msg); if(!cond) fails++; }
@@ -141,6 +141,24 @@ r = lib.aimCheck(track(() => ({ x: null, y: null })), 900, AIM);
 ok(!r.ok && r.reason === 'no dot', 'no dot at all is rejected');
 r = lib.aimCheck(track(t => (t < 650 ? { x: 40 + t * 0.2, y: 200 - t * 0.12 } : { x: 170, y: 122 })), 900, AIM);
 ok(r.ok, 'fast draw that settles 250 ms before the break is accepted');
+
+// --- Analysis on the first real session (2026-10-15) ---
+const session1 = [
+  [1.744, 'A', 0.5700, 0.4481, 2.05], [2.009, 'A', 0.5011, 0.4891, 0.64], [4.648, 'A', 0.4810, 0.5894, 4.32],
+  [1.777, 'A', 0.5291, 0.4465, 0.27], [1.965, 'C', 0.4443, 0.3457, 0.70], [2.063, 'A', 0.4727, 0.4871, 1.16],
+  [2.048, 'C', 0.4933, 0.3204, 1.54], [2.336, 'A', 0.4574, 0.5147, 1.51], [2.337, 'A', 0.4835, 0.4120, 0.05],
+  [2.202, 'C', 0.4854, 0.3434, 1.18]
+].map((a, i) => ({ n: i + 1, t: a[0], zone: a[1], u: a[2], v: a[3], mv: a[4], early: false, par: 1.5 }));
+const an = lib.analyzeReps(session1, { targetW: 8.5, targetH: 11 });
+ok(an.outliers === 1 && an.avg === 2.05, 'average 2.05 s with the 4.65 s rep excluded (got ' + an.avg + ', ' + an.outliers + ' outlier)');
+ok(an.best === 1.74 && an.underPar === 0, 'best 1.74 s, 0 under par');
+ok(an.zones.A === 7 && an.zones.C === 3, 'zones 7 A / 3 C');
+ok(an.biasY > 0.5 && Math.abs(an.biasX) < 0.2, 'hits sit high (' + an.biasY + ' in) and centered left-right (' + an.biasX + ' in)');
+ok(an.spreadY > 2.5 && an.spreadX < 1.2, 'vertical stringing ' + an.spreadX + ' x ' + an.spreadY + ' in');
+ok(an.suggestedPar === 2.05, 'suggests par 2.05 s (got ' + an.suggestedPar + ')');
+ok(an.trend > 0.2, 'detects slowing across the set (+' + an.trend + ' s)');
+ok(an.notes.some(x => /vertically/.test(x)) && an.notes.some(x => /rising/.test(x)), 'coaching note names the vertical string and rising muzzle');
+ok(lib.analyzeReps([], { targetW: 8.5, targetH: 11 }).notes.length === 1, 'empty data returns a prompt instead of failing');
 
 console.log(fails ? fails + ' test(s) failed' : 'All tests passed');
 process.exit(fails ? 1 : 0);

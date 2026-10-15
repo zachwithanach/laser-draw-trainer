@@ -36,6 +36,12 @@ Live app: https://zachwithanach.github.io/laser-draw-trainer/
 - [x] Aim check: trigger learning and free shots require a steady dot on the target for the 250 ms before the click, so racking is ignored.
 - [x] Tests for always-on tracking and click detection.
 
+## Phase 1.6: analysis (shipped)
+
+- [x] `analyzeReps`: outlier-trimmed average, best, under par, zones, bias and spread in inches, median movement, first-third vs last-third trend.
+- [x] Coaching notes and suggested par with a one-tap **Set par** button.
+- [x] Analysis panel with session and all-history scopes; tested against the 2026-10-15 session.
+
 ## Phase 2: accuracy
 
 - [ ] qa: measure audio-to-video timing skew on iPhone Safari and correct the dot lookup window.
@@ -43,7 +49,7 @@ Live app: https://zachwithanach.github.io/laser-draw-trainer/
 - [ ] detection: handle `exposureMode` and `frameRate` constraints on Android Chrome.
 - [ ] calibration: ArUco markers on a printable target for automatic calibration.
 - [ ] calibration: printable target PDF with corner markers and zone rings.
-- [ ] drills: par-time ladder (auto-tighten par after three consecutive hits under par).
+- [ ] drills: par-time ladder (auto-tighten par after three consecutive hits under par). The analysis panel already suggests par per set.
 - [ ] qa: record real clips from a phone and add them as regression fixtures.
 
 ## Phase 3: product

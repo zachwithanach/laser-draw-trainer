@@ -32,6 +32,12 @@ Keep all live ammunition out of the room for every session.
 
 Zones are circles centred on the target: A (15% of target width), C (30%), D (on paper), Miss (off paper). Set the target size in Settings. The hit map draws the last 400 ms of dot travel before the most recent shot.
 
+## Analysis
+
+The **Analysis** panel summarizes **This session** or **All history**: average and best time, reps under par, zone counts, median dot movement, average vertical and horizontal offset from center, and group spread. Reps slower than 1.6 times your median are excluded from the average and called out.
+
+The panel also writes coaching notes for vertical or horizontal stringing, offset groups, slowing across a set, and high trigger-press movement. When par is out of reach or too easy, it suggests a new par, and **Set par** applies it.
+
 ## Always-on mode rules
 
 - A click counts only when it is louder than the click threshold and the laser dot is in view.
