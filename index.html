@@ -295,6 +295,29 @@ function createClickDetector(sampleRate){
 // @ldt-click-end
 
 // ---------------------------------------------------------------------------
+// Aim check. Pure. A click counts only when the dot was steady before it.
+// samples: [{t, x, y}] with x null when no dot. Returns {ok, reason, at}.
+// ---------------------------------------------------------------------------
+// @ldt-aim-start
+function aimCheck(samples, tp, o){
+  const win = o.windowMs || 250, minFrac = o.minFrac || 0.6, maxSpread = o.maxSpread || 12;
+  const inWin = samples.filter(s => s.t >= tp - win && s.t <= tp + 40);
+  if(!inWin.length) return { ok: false, reason: 'no frames' };
+  const seen = inWin.filter(s => s.x != null);
+  if(seen.length / inWin.length < minFrac) return { ok: false, reason: 'no dot' };
+  let mx = 0, my = 0;
+  seen.forEach(s => { mx += s.x; my += s.y; });
+  mx /= seen.length; my /= seen.length;
+  let spread = 0;
+  seen.forEach(s => { const d = Math.hypot(s.x - mx, s.y - my); if(d > spread) spread = d; });
+  if(spread > maxSpread) return { ok: false, reason: 'moving' };
+  let at = seen[0], bd = 1e9;
+  seen.forEach(s => { const d = Math.abs(s.t - tp); if(d < bd){ bd = d; at = s; } });
+  return { ok: true, reason: '', at: at };
+}
+// @ldt-aim-end
+
+// ---------------------------------------------------------------------------
 // Settings and storage
 // ---------------------------------------------------------------------------
 const DEFAULTS = { mode: 'always', clickThr: 0.15, color: 'red', sens: 60, minDelay: 2, maxDelay: 5, par: 1.5, timeout: 8, targetW: 8.5, targetH: 11, latency: 0, repeatDelay: 6, parBeep: true, auto: true };
@@ -651,7 +674,7 @@ function onAudioEvent(e){
   if(e.type !== 'click') return;
   const tp = ctxToPerf(e.t);
   if(st.gates.some(g => tp >= g[0] && tp <= g[1])) return;   // our own beep
-  if(st.learn){ learnClick(e); return; }
+  if(st.learn){ setTimeout(() => learnIfAimed(e, tp), 150); return; }
   if(S.mode !== 'always' || e.peak < S.clickThr) return;
   if(tp - st.lastClickAt < DEBOUNCE_MS) return;
   st.lastClickAt = tp;
@@ -683,9 +706,25 @@ function handleClick(tp){
   } else if(st.drill === 'standby'){
     if(at && scoreHit(at.x, at.y).zone !== 'Miss') onShot(tp, at, mv);
   } else if(st.drill === 'idle'){
-    if(at) onShot(tp, at, mv);
-    else setStatus('Click heard, but no laser dot in view.');
+    if(aimedOnTarget(tp).ok && at) onShot(tp, at, mv);
   }
+}
+const AIM = { windowMs: 250, minFrac: 0.6, maxSpread: 12 };
+function aimedOnTarget(tp){
+  const a = aimCheck(st.dotBuf, tp, AIM);
+  if(!a.ok) return a;
+  if(st.H && scoreHit(a.at.x, a.at.y).zone === 'Miss') return { ok: false, reason: 'off target' };
+  return a;
+}
+function learnIfAimed(e, tp){
+  if(!st.learn) return;
+  const a = aimedOnTarget(tp);
+  if(!a.ok){
+    const why = a.reason === 'moving' ? 'the dot was moving' : a.reason === 'off target' ? 'the dot was off the target' : 'no laser dot was on the target';
+    setStatus('Ignored a sound because ' + why + '. Hold the dot steady on the target and dry-fire.');
+    return;
+  }
+  learnClick(e);
 }
 function learnClick(e){
   st.learn.peaks.push(e.peak);
@@ -703,7 +742,7 @@ btnLearn.addEventListener('click', async () => {
   if(!(await startMic())) return;
   st.learn = { peaks: [] };
   btnLearn.textContent = 'Cancel learning';
-  setStatus('Dry-fire 3 times with the phone where it sits for drills. Rack between presses.');
+  setStatus('Hold the dot steady on the target and dry-fire 3 times. Racking is ignored.');
 });
 $('sMode').addEventListener('change', async () => {
   if(S.mode === 'always' && st.camOn) await startMic();

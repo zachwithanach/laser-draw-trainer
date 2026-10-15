@@ -10,7 +10,7 @@ function block(name){
   if(!m) throw new Error('Marker block not found: ' + name);
   return m[1];
 }
-const lib = new Function(block('detector') + block('geom') + block('click') + '\nreturn { createDetector, homographyToUnit, applyH, createClickDetector };')();
+const lib = new Function(block('detector') + block('geom') + block('click') + block('aim') + '\nreturn { createDetector, homographyToUnit, applyH, createClickDetector, aimCheck };')();
 
 let fails = 0;
 function ok(cond, msg){ console.log((cond ? 'PASS ' : 'FAIL ') + msg); if(!cond) fails++; }
@@ -127,6 +127,20 @@ ev = runClicks(audio(2, [{ at: 0.4, amp: 0.6 }, { at: 1.2, amp: 0.5 }]));
 ok(ev.length === 2, 'two clicks 0.8 s apart both detected');
 ev = runClicks(audio(2, [], { at: 0.5, amp: 0.05, len: 1 }));
 ok(ev.every(e => e.peak < 0.15), 'soft sustained sound stays below the default 0.15 shot threshold');
+
+// --- Aim check: racking is rejected, an aimed press is accepted ---
+const AIM = { windowMs: 250, minFrac: 0.6, maxSpread: 12 };
+const track = (fn) => { const a = []; for(let t = 0; t <= 1000; t += 33) a.push(Object.assign({ t }, fn(t))); return a; };
+let r = lib.aimCheck(track(t => ({ x: 160 + Math.sin(t) * 2, y: 120 + Math.cos(t) * 2 })), 900, AIM);
+ok(r.ok, 'steady dot before the click is accepted');
+r = lib.aimCheck(track(t => ({ x: 40 + t * 0.25, y: 60 + t * 0.15 })), 900, AIM);
+ok(!r.ok && r.reason === 'moving', 'dot sweeping across the frame (racking) is rejected');
+r = lib.aimCheck(track(t => (Math.floor(t / 33) % 3 ? { x: null, y: null } : { x: 160, y: 120 })), 900, AIM);
+ok(!r.ok && r.reason === 'no dot', 'dot flickering in and out of view is rejected');
+r = lib.aimCheck(track(() => ({ x: null, y: null })), 900, AIM);
+ok(!r.ok && r.reason === 'no dot', 'no dot at all is rejected');
+r = lib.aimCheck(track(t => (t < 650 ? { x: 40 + t * 0.2, y: 200 - t * 0.12 } : { x: 170, y: 122 })), 900, AIM);
+ok(r.ok, 'fast draw that settles 250 ms before the break is accepted');
 
 console.log(fails ? fails + ' test(s) failed' : 'All tests passed');
 process.exit(fails ? 1 : 0);
