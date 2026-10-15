@@ -5,7 +5,7 @@ Single-file phone web app (`index.html`) for laser dry-fire training. Plain HTML
 ## Conventions
 
 - Keep the app in one self-contained `index.html`. External resources are limited to Google Fonts.
-- Keep the detector and geometry code pure (no DOM access) and inside their `// @ldt-*-start` / `// @ldt-*-end` markers. `tests/run.js` extracts those blocks.
+- Keep the detector, geometry, and click-detector code pure (no DOM access) and inside their `// @ldt-*-start` / `// @ldt-*-end` markers. `tests/run.js` extracts those blocks. `createClickDetector` is also serialized into the AudioWorklet with `toString()`, so it must not reference anything outside its own body.
 - Run `node tests/run.js` after any change to detection or calibration. Add a synthetic test for every bug you fix.
 - Store state in `localStorage` with try/catch. The page must work when storage is unavailable.
 - Write UI copy in sentence case, active voice, plain verbs.
@@ -17,7 +17,7 @@ Use the subagents in `.claude/agents/`. Each owns one workstream and reports bac
 
 | Agent | Owns |
 |---|---|
-| detection | `createDetector`, pulse and debounce logic |
+| detection | `createDetector`, `createClickDetector`, shot resolution (`handleClick`, `dotAt`) |
 | calibration | corner taps, homography, ArUco |
 | drills | shot timer, par, drill state machine |
 | ui | layout, settings, hit map, history |
