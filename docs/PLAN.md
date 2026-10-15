@@ -33,6 +33,7 @@ Live app: https://zachwithanach.github.io/laser-draw-trainer/
 - [x] Learn trigger click: three dry-fires set the threshold to half the quietest click.
 - [x] Trigger-press movement (dot travel over the last 120 ms) per rep, session average, and pre-shot trace on the hit map.
 - [x] Mic level meter with threshold marker.
+- [x] Aim check: trigger learning and free shots require a steady dot on the target for the 250 ms before the click, so racking is ignored.
 - [x] Tests for always-on tracking and click detection.
 
 ## Phase 2: accuracy

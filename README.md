@@ -21,7 +21,7 @@ Always-on mode also records **movement**: how far the dot travels in the 120 ms 
 2. Mount the phone so the whole target plus a margin fills the camera view. Dim the room.
 3. Open the live app in Safari or Chrome and tap **Start camera**. Allow camera and microphone access.
 4. Holster, tap **Calibrate**, then tap the target's top-left, top-right, bottom-right, and bottom-left corners.
-5. Open **Settings**, tap **Learn trigger click**, and dry-fire three times at the target, racking between presses.
+5. Open **Settings**, tap **Learn trigger click**, hold the dot steady on the target, and dry-fire three times. Rack between presses; the app ignores rack noise.
 6. Holster and tap **Start drill**.
 7. Draw and fire on the beep. The app shows time to first shot, the zone, and the dot movement.
 8. Rack the slide and holster. The next rep starts automatically after the pause.
@@ -35,6 +35,7 @@ Zones are circles centred on the target: A (15% of target width), C (30%), D (on
 ## Always-on mode rules
 
 - A click counts only when it is louder than the click threshold and the laser dot is in view.
+- Trigger learning and free shots outside a drill also require an aimed dot: visible in most frames of the last 250 ms, steady within 12 px, and on the paper once calibrated. Racking swings the dot, so rack noise is ignored.
 - Clicks during the start delay count as early shots only when the dot is on the paper, so holster noise is ignored.
 - The app ignores the microphone while its own beeps play.
 - Calibrate with the gun holstered. Calibration resets the background model, and a dot in view at that moment becomes background.
