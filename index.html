@@ -40,6 +40,9 @@ h1{ font-family:var(--display); font-weight:700; font-size:28px; margin:0; lette
 .pill.on{ color:var(--ok); border-color:var(--ok); }
 .stage{ position:relative; width:100%; aspect-ratio:4/3; background:var(--stage); border-radius:10px; overflow:hidden; touch-action:manipulation; }
 .stage video,.stage canvas{ position:absolute; inset:0; width:100%; height:100%; }
+.stage canvas{ touch-action:none; }
+.callout{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-family:var(--display); font-weight:700; font-size:160px; line-height:1; color:#ffffff; text-shadow:0 2px 16px rgba(0,0,0,.6); pointer-events:none; opacity:0; }
+.callout.on{ opacity:.92; }
 .stage video{ object-fit:fill; }
 .stage .hint{ position:absolute; left:0; right:0; bottom:0; padding:10px 12px; font-size:15px; color:#f2f2f2; background:linear-gradient(transparent,rgba(0,0,0,.7)); pointer-events:none; }
 .stage .hint:empty{ display:none; }
@@ -88,6 +91,9 @@ summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:
 .ana-grid div{ background:var(--bg); border-radius:8px; padding:8px 10px; }
 .ana-grid span{ display:block; font-size:13px; color:var(--muted); }
 .ana-grid b{ font-family:var(--display); font-weight:700; font-size:24px; font-variant-numeric:tabular-nums; }
+.ana-targets{ margin-top:10px; font-size:15px; font-variant-numeric:tabular-nums; }
+.ana-targets div{ display:flex; justify-content:space-between; gap:12px; padding:3px 0; border-bottom:1px solid var(--line); }
+.ana-targets div:last-child{ border-bottom:0; }
 .ana-notes{ margin:12px 0 0; padding-left:20px; font-size:15px; }
 .ana-notes li{ margin:4px 0; }
 .history{ margin-top:12px; max-height:280px; overflow:auto; }
@@ -111,6 +117,7 @@ summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:
   <div class="stage" id="stage">
     <video id="video" playsinline muted autoplay></video>
     <canvas id="overlay"></canvas>
+    <div class="callout" id="callout"></div>
     <div class="hint" id="hint">Start the camera, then calibrate the target.</div>
   </div>
 
@@ -135,6 +142,7 @@ summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:
         <select id="sMode"><option value="always">Always on (shot = trigger click)</option><option value="pulse">Pulse (fires on trigger)</option></select>
       </label>
       <label class="field">Click threshold (0.01 to 1)<input id="sClick" type="number" min="0.01" max="1" step="0.01"></label>
+      <label class="field">Targets (1 to 4)<input id="sTargets" type="number" min="1" max="4" step="1"></label>
       <label class="field">Laser color
         <select id="sColor"><option value="red">Red</option><option value="green">Green</option><option value="any">Either</option></select>
       </label>
@@ -167,6 +175,7 @@ summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:
       <label class="field">Data<select id="anaScope"><option value="session">This session</option><option value="all">All history</option></select></label>
     </div>
     <div class="ana-grid" id="anaGrid"></div>
+    <div class="ana-targets" id="anaTargets"></div>
     <ul class="ana-notes" id="anaNotes"></ul>
     <div class="actions"><button class="quiet" id="btnPar" hidden></button></div>
   </details>
@@ -293,6 +302,55 @@ function applyH(h, x, y){
 // @ldt-geom-end
 
 // ---------------------------------------------------------------------------
+// Targets. Pure; needs applyH. Hs: one homography per calibrated target.
+// ---------------------------------------------------------------------------
+// @ldt-targets-start
+function zoneOn(Hm, x, y, tw, th){
+  const uv = applyH(Hm, x, y), u = uv[0], v = uv[1];
+  const dx = (u - 0.5) * tw, dy = (v - 0.5) * th, r = Math.hypot(dx, dy);
+  const onPaper = Math.abs(dx) <= tw / 2 && Math.abs(dy) <= th / 2;
+  let zone = 'Miss';
+  if(r <= 0.15 * tw) zone = 'A'; else if(r <= 0.30 * tw) zone = 'C'; else if(onPaper) zone = 'D';
+  return { zone: zone, u: u, v: v };
+}
+// called: index of the called target, or null for free shots. Returns {zone, u, v, hit}.
+// u and v are relative to the called target; a hit on another target is 'Wrong'.
+function classifyHit(Hs, called, x, y, tw, th){
+  const c = called == null ? 0 : called;
+  const own = zoneOn(Hs[c], x, y, tw, th);
+  if(own.zone !== 'Miss') return { zone: own.zone, u: own.u, v: own.v, hit: c };
+  for(let i = 0; i < Hs.length; i++){
+    if(i === c) continue;
+    const r = zoneOn(Hs[i], x, y, tw, th);
+    if(r.zone !== 'Miss') return called == null ? { zone: r.zone, u: r.u, v: r.v, hit: i } : { zone: 'Wrong', u: own.u, v: own.v, hit: i };
+  }
+  return { zone: 'Miss', u: own.u, v: own.v, hit: -1 };
+}
+// True when (x, y) lies within `margin` target sizes of any target's center region.
+function nearAnyTarget(Hs, x, y, margin){
+  return Hs.some(Hm => { const uv = applyH(Hm, x, y); return Math.abs(uv[0] - 0.5) <= margin && Math.abs(uv[1] - 0.5) <= margin; });
+}
+// True when (x, y) is near a target or inside the box spanning every target's corners,
+// so a miss between sheets still counts while a rack far off to the side does not.
+function withinTargets(Hs, cornerSets, x, y, margin){
+  if(nearAnyTarget(Hs, x, y, margin)) return true;
+  if(cornerSets.length < 2) return false;
+  const xs = [], ys = [];
+  cornerSets.forEach(cs => cs.forEach(c => { xs.push(c.x); ys.push(c.y); }));
+  return x >= Math.min.apply(null, xs) && x <= Math.max.apply(null, xs) && y >= Math.min.apply(null, ys) && y <= Math.max.apply(null, ys);
+}
+// Random target index; never the same target three times in a row.
+function pickTarget(n, recent, rnd){
+  if(n <= 1) return 0;
+  let opts = [];
+  for(let i = 0; i < n; i++) opts.push(i);
+  const k = recent.length;
+  if(k >= 2 && recent[k - 1] === recent[k - 2]) opts = opts.filter(i => i !== recent[k - 1]);
+  return opts[Math.floor(rnd() * opts.length) % opts.length];
+}
+// @ldt-targets-end
+
+// ---------------------------------------------------------------------------
 // Trigger-click detection. Pure; runs inside an AudioWorklet via toString().
 // Emits {type:'click', t, peak, floor} at each impulsive onset and
 // {type:'level', v, floor} every 50 ms for the meter.
@@ -354,7 +412,7 @@ function analyzeReps(reps, o){
   const median = a => { const b = a.slice().sort((x, y) => x - y), m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; };
   const r2 = x => Math.round(x * 100) / 100;
   const out = { reps: reps.length, timed: 0, outliers: 0, avg: null, avgAll: null, best: null, underPar: 0,
-    zones: { A: 0, C: 0, D: 0, Miss: 0, Hit: 0, 'No shot': 0, Early: 0 }, biasX: null, biasY: null,
+    zones: { A: 0, C: 0, D: 0, Miss: 0, Wrong: 0, Hit: 0, 'No shot': 0, Early: 0 }, biasX: null, biasY: null, perTarget: null,
     spreadX: null, spreadY: null, mvMedian: null, trend: null, suggestedPar: null, notes: [] };
   reps.forEach(r => { const z = r.early ? 'Early' : r.zone; if(z in out.zones) out.zones[z]++; });
   const timed = reps.filter(r => r.t != null && !r.early);
@@ -408,6 +466,19 @@ function analyzeReps(reps, o){
     if(out.trend > 0.2) n.push('Your last reps averaged ' + out.trend.toFixed(2) + ' s slower than your first. Rest between sets.');
     else if(out.trend < -0.2) n.push('Your last reps averaged ' + (-out.trend).toFixed(2) + ' s faster than your first.');
   }
+  const tset = Array.from(new Set(reps.map(r => r.target).filter(x => x != null))).sort((a, b) => a - b);
+  if(tset.length > 1){
+    out.perTarget = tset.map(tg => {
+      const rs = reps.filter(r => r.target === tg), tt = core.filter(r => r.target === tg).map(r => r.t);
+      return { target: tg, n: rs.length, avg: tt.length ? r2(mean(tt)) : null, hits: rs.filter(r => r.zone === 'A' || r.zone === 'C' || r.zone === 'D').length };
+    });
+    const tm = out.perTarget.filter(p => p.avg != null);
+    if(tm.length > 1){
+      const slow = tm.reduce((a, b) => b.avg > a.avg ? b : a), fast = tm.reduce((a, b) => b.avg < a.avg ? b : a);
+      if(slow.avg - fast.avg > 0.25) n.push('Target ' + slow.target + ' averages ' + (slow.avg - fast.avg).toFixed(2) + ' s slower than target ' + fast.target + '. Practice that transition.');
+    }
+  }
+  if(out.zones.Wrong) n.push(out.zones.Wrong + ' shot' + (out.zones.Wrong > 1 ? 's' : '') + ' hit the wrong target. Confirm the callout before you press.');
   if(out.mvMedian != null && out.mvMedian > 1) n.push('Median dot movement before the break is ' + out.mvMedian.toFixed(2) + ' in. Let the dot stop before you finish the press.');
   if(!n.length) n.push('Solid set. Keep par where it is and repeat.');
   return out;
@@ -417,8 +488,8 @@ function analyzeReps(reps, o){
 // ---------------------------------------------------------------------------
 // Settings and storage
 // ---------------------------------------------------------------------------
-const DEFAULTS = { mode: 'always', clickThr: 0.15, color: 'red', sens: 60, minDelay: 2, maxDelay: 5, par: 1.5, timeout: 8, targetW: 8.5, targetH: 11, latency: 0, repeatDelay: 6, parBeep: false, auto: true, ver: 2 };
-const LS_SET = 'ldt.settings', LS_HIST = 'ldt.history';
+const DEFAULTS = { mode: 'always', clickThr: 0.15, color: 'red', sens: 60, minDelay: 2, maxDelay: 5, par: 1.5, timeout: 8, targetW: 8.5, targetH: 11, latency: 0, repeatDelay: 6, parBeep: false, auto: true, nTargets: 1, ver: 2 };
+const LS_SET = 'ldt.settings', LS_HIST = 'ldt.history', LS_CAL = 'ldt.calibration';
 function lsGet(k, fallback){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; }catch(e){ return fallback; } }
 function lsSet(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 const S = Object.assign({}, DEFAULTS, lsGet(LS_SET, {}));
@@ -437,7 +508,7 @@ const octx = overlay.getContext('2d');
 const work = document.createElement('canvas');
 const wctx = work.getContext('2d', { willReadFrequently: true });
 
-const fields = { mode: 'sMode', clickThr: 'sClick', color: 'sColor', sens: 'sSens', minDelay: 'sMin', maxDelay: 'sMax', par: 'sPar', timeout: 'sTimeout', targetW: 'sTW', targetH: 'sTH', latency: 'sLat', repeatDelay: 'sRepeat', parBeep: 'sParBeep', auto: 'sAuto' };
+const fields = { mode: 'sMode', clickThr: 'sClick', nTargets: 'sTargets', color: 'sColor', sens: 'sSens', minDelay: 'sMin', maxDelay: 'sMax', par: 'sPar', timeout: 'sTimeout', targetW: 'sTW', targetH: 'sTH', latency: 'sLat', repeatDelay: 'sRepeat', parBeep: 'sParBeep', auto: 'sAuto' };
 function loadFields(){
   for(const k in fields){ const el = $(fields[k]); if(el.type === 'checkbox') el.checked = !!S[k]; else el.value = S[k]; }
 }
@@ -458,12 +529,12 @@ loadFields();
 const DEBOUNCE_MS = 150;
 let W = 320, H = 240, det = null, srcW = 0, srcH = 0;
 const st = { camOn: false, dotOn: false, dotSince: 0, dot: null, lastShotAt: -1e9, lastHit: null, lastHitAt: 0, flooded: false,
-  calibrating: false, corners: [], H: null, drill: 'idle', rep: 0, beepAt: 0, timers: [], session: [],
+  calibrating: false, calTi: 0, targets: [], drag: null, called: null, recentCalls: [], speechGate: null, drill: 'idle', rep: 0, beepAt: 0, timers: [], session: [],
   dotBuf: [], lastClickAt: -1e9, gates: [], learn: null, mic: null, lastTrace: [] };
 
 const fmt = t => t.toFixed(2);
 function setStatus(msg){ statusEl.textContent = msg; }
-function showZone(z){ zoneEl.textContent = (z === 'A' || z === 'C' || z === 'D') ? z + ' zone' : z; }
+function showZone(z){ zoneEl.textContent = (z === 'A' || z === 'C' || z === 'D') ? z + ' zone' : z === 'Wrong' ? 'Wrong target' : z; }
 function showTime(t){
   clock.innerHTML = fmt(t) + '<small>s</small>';
   const done = st.drill === 'done';
@@ -479,8 +550,20 @@ function initBuffers(){
   work.width = W; work.height = H; overlay.width = W; overlay.height = H;
   stage.style.aspectRatio = srcW + ' / ' + srcH;
   det = createDetector(W, H);
-  st.corners = []; st.H = null; st.calibrating = false; st.dotOn = false; st.dot = null;
+  st.targets = []; st.calibrating = false; st.drag = null; st.dotOn = false; st.dot = null;
   btnCal.textContent = 'Calibrate';
+  const saved = lsGet(LS_CAL, null);
+  if(saved && saved.srcW === srcW && saved.srcH === srcH && saved.W === W && Array.isArray(saved.targets) && saved.targets.length === S.nTargets){
+    st.targets = saved.targets.map(c => ({ corners: c, H: homographyToUnit(c) }));
+    if(calibrated()){ btnCal.textContent = 'Recalibrate'; return true; }
+    st.targets = [];
+  }
+  return false;
+}
+function calibrated(){ return st.targets.length > 0 && st.targets.length === S.nTargets && st.targets.every(t => t.H); }
+function Hs(){ return st.targets.map(t => t.H); }
+function saveCalib(){
+  lsSet(LS_CAL, calibrated() ? { srcW, srcH, W, targets: st.targets.map(t => t.corners) } : null);
 }
 
 // ---------------------------------------------------------------------------
@@ -501,14 +584,14 @@ async function startCamera(){
     video.srcObject = stream;
     await video.play();
     await new Promise(res => { if(video.videoWidth) res(); else video.addEventListener('loadedmetadata', res, { once: true }); });
-    initBuffers();
+    const restored = initBuffers();
     st.camOn = true;
     btnCam.textContent = 'Stop camera'; btnCal.disabled = false; btnDrill.disabled = false;
     const s = stream.getVideoTracks()[0].getSettings();
     pill.dataset.base = (s.width || '?') + 'x' + (s.height || '?') + (s.frameRate ? ' at ' + Math.round(s.frameRate) + ' fps' : '');
     updatePill(); pill.classList.add('on');
-    hint.textContent = 'Holster, tap Calibrate, then tap the four corners of the target.';
-    setStatus('');
+    hint.textContent = restored ? '' : 'Holster, tap Calibrate, then tap the four corners of ' + (S.nTargets > 1 ? 'each target.' : 'the target.');
+    setStatus(restored ? 'Calibration restored. Drag a corner to adjust, or tap Recalibrate if the phone moved.' : '');
     loop();
     if(S.mode === 'always') await startMic();
   }catch(err){
@@ -560,36 +643,78 @@ function processFrame(ts){
 // ---------------------------------------------------------------------------
 // Calibration
 // ---------------------------------------------------------------------------
+const CORNER_NAMES = ['top-left', 'top-right', 'bottom-right', 'bottom-left'];
+function calPrompt(){
+  const t = st.calTi, c = st.targets[t] ? st.targets[t].corners.length : 0;
+  hint.textContent = (S.nTargets > 1 ? 'Target ' + (t + 1) + ': tap' : 'Tap') + ' the ' + CORNER_NAMES[c] + ' corner.';
+}
 btnCal.addEventListener('click', () => {
-  st.calibrating = true; st.corners = []; st.H = null;
+  if(st.drill !== 'idle') stopDrill();
+  st.calibrating = true; st.calTi = 0; st.targets = [{ corners: [], H: null }];
   if(det) det = createDetector(W, H);
-  hint.textContent = 'Tap the top-left corner of the target.';
-  setStatus('');
+  calPrompt(); setStatus('');
 });
-overlay.addEventListener('pointerdown', e => {
-  if(!st.camOn || !st.calibrating) return;
-  e.preventDefault();
+function toWork(e){
   const r = overlay.getBoundingClientRect();
-  st.corners.push({ x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H });
-  const names = ['top-right', 'bottom-right', 'bottom-left'];
-  if(st.corners.length < 4){ hint.textContent = 'Tap the ' + names[st.corners.length - 1] + ' corner.'; return; }
-  st.H = homographyToUnit(st.corners);
-  st.calibrating = false;
-  if(st.H){ btnCal.textContent = 'Recalibrate'; hint.textContent = ''; setStatus('Calibrated. Holster, then tap Start drill.'); }
-  else { st.corners = []; hint.textContent = 'Those corners do not form a quadrilateral. Tap Calibrate and try again.'; }
+  return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H, sx: r.width / W, sy: r.height / H };
+}
+overlay.addEventListener('pointerdown', e => {
+  if(!st.camOn) return;
+  const p = toWork(e);
+  if(st.calibrating){
+    e.preventDefault();
+    const t = st.targets[st.calTi];
+    t.corners.push({ x: p.x, y: p.y });
+    if(t.corners.length < 4){ calPrompt(); return; }
+    t.H = homographyToUnit(t.corners);
+    if(!t.H){ t.corners = []; hint.textContent = 'Those corners do not form a quadrilateral. Tap the ' + CORNER_NAMES[0] + ' corner again.'; return; }
+    if(st.calTi + 1 < S.nTargets){ st.calTi++; st.targets.push({ corners: [], H: null }); calPrompt(); return; }
+    st.calibrating = false; saveCalib();
+    btnCal.textContent = 'Recalibrate'; hint.textContent = '';
+    setStatus('Calibrated. Drag any corner to adjust. Holster, then tap Start drill.');
+    return;
+  }
+  if(st.drill === 'standby' || st.drill === 'listening' || !st.targets.length) return;
+  let best = null, bd = 28;   // CSS px grab radius
+  st.targets.forEach((t, ti) => t.corners.forEach((c, ci) => {
+    const d = Math.hypot((c.x - p.x) * p.sx, (c.y - p.y) * p.sy);
+    if(d < bd){ bd = d; best = { ti, ci }; }
+  }));
+  if(!best) return;
+  e.preventDefault();
+  st.drag = best;
+  try{ overlay.setPointerCapture(e.pointerId); }catch(err){}
+});
+overlay.addEventListener('pointermove', e => {
+  if(!st.drag) return;
+  e.preventDefault();
+  const p = toWork(e), t = st.targets[st.drag.ti];
+  t.corners[st.drag.ci] = { x: Math.max(0, Math.min(W, p.x)), y: Math.max(0, Math.min(H, p.y)) };
+  const h = homographyToUnit(t.corners);
+  if(h) t.H = h;
+});
+function endDrag(){
+  if(!st.drag) return;
+  st.drag = null;
+  if(calibrated()){ saveCalib(); setStatus('Corner adjusted.'); }
+}
+overlay.addEventListener('pointerup', endDrag);
+overlay.addEventListener('pointercancel', endDrag);
+$('sTargets').addEventListener('change', () => {
+  S.nTargets = Math.max(1, Math.min(4, Math.round(S.nTargets) || 1));
+  $('sTargets').value = S.nTargets; lsSet(LS_SET, S);
+  st.targets = []; st.calibrating = false; saveCalib();
+  btnCal.textContent = 'Calibrate';
+  setStatus('Tap Calibrate and mark ' + S.nTargets + ' target' + (S.nTargets > 1 ? 's' : '') + '.');
 });
 
 const zoneA = () => 0.15 * S.targetW;
 const zoneC = () => 0.30 * S.targetW;
 function scoreHit(x, y){
-  if(!st.H) return { zone: 'Hit', u: null, v: null };
-  const uv = applyH(st.H, x, y), u = uv[0], v = uv[1];
-  const dx = (u - 0.5) * S.targetW, dy = (v - 0.5) * S.targetH, r = Math.hypot(dx, dy);
-  const onPaper = Math.abs(dx) <= S.targetW / 2 && Math.abs(dy) <= S.targetH / 2;
-  let zone = 'Miss';
-  if(r <= zoneA()) zone = 'A'; else if(r <= zoneC()) zone = 'C'; else if(onPaper) zone = 'D';
-  return { zone, u, v };
+  if(!calibrated()) return { zone: 'Hit', u: null, v: null, hit: -1 };
+  return classifyHit(Hs(), st.called, x, y, S.targetW, S.targetH);
 }
+function onAnyPaper(x, y){ return !calibrated() || nearAnyTarget(Hs(), x, y, 0.5); }
 
 // ---------------------------------------------------------------------------
 // Drill: draw to first shot
@@ -650,17 +775,47 @@ function clearPar(){
   stage.classList.remove('par-under', 'par-over'); clock.classList.remove('live-over');
 }
 
+const WORDS = ['One', 'Two', 'Three', 'Four'];
+const calloutEl = $('callout');
+let speechUnlocked = false;
+function unlockSpeech(){
+  if(speechUnlocked || !('speechSynthesis' in window)) return;
+  try{ const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); speechUnlocked = true; }catch(e){}
+}
+function sayTarget(i){
+  st.speechGate = [st.beepAt - 30, st.beepAt + 900];
+  if('speechSynthesis' in window){
+    try{
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(WORDS[i]);
+      u.rate = 1.3; u.lang = 'en-US';
+      u.onend = () => { if(st.speechGate) st.speechGate[1] = performance.now() + 150; };
+      speechSynthesis.speak(u);
+      return;
+    }catch(e){}
+  }
+  for(let k = 0; k <= i; k++) setTimeout(() => beep(1200, 0.05), 150 + k * 130);   // fallback: N short beeps
+}
+function showCallout(i){ calloutEl.textContent = i == null ? '' : String(i + 1); calloutEl.classList.toggle('on', i != null); }
+
 function startRep(){
   clearTimers();
   st.rep++; st.drill = 'standby';
-  clearPar();
+  clearPar(); st.called = null; st.speechGate = null; showCallout(null);
   btnDrill.textContent = 'Stop';
   showTime(0); showZone('\u2014'); repLabel.textContent = 'Rep ' + st.rep;
   setStatus('Standby.');
   const delay = (S.minDelay + Math.random() * Math.max(0, S.maxDelay - S.minDelay)) * 1000;
   timer(() => {
+    st.called = pickTarget(S.nTargets, st.recentCalls, Math.random);
+    st.recentCalls.push(st.called); if(st.recentCalls.length > 10) st.recentCalls.shift();
     st.beepAt = beep(1800, 0.12);
     const lead = Math.max(0, st.beepAt - performance.now());
+    if(S.nTargets > 1){
+      setTimeout(() => sayTarget(st.called), lead + 140);
+      showCallout(st.called);
+      repLabel.textContent = 'Rep ' + st.rep + ' \u00b7 target ' + (st.called + 1);
+    }
     st.drill = 'listening';
     setStatus('Go.');
     startClock();
@@ -689,12 +844,13 @@ function scheduleNext(){
 }
 function stopDrill(){
   clearTimers(); stopClock(); clearPar();
+  st.called = null; st.speechGate = null; showCallout(null);
   if(st.drill !== 'idle'){ setStatus('Drill stopped.'); }
   st.drill = 'idle';
   btnDrill.textContent = 'Start drill';
 }
 btnDrill.addEventListener('click', () => {
-  if(st.drill === 'idle'){ ensureAudio(); keepAwake(); startRep(); }
+  if(st.drill === 'idle'){ ensureAudio(); unlockSpeech(); keepAwake(); startRep(); }
   else stopDrill();
 });
 btnBeep.addEventListener('click', () => beep(1800, 0.12));
@@ -707,16 +863,16 @@ function onShot(ts, blob, mv){
     clearTimers(); stopClock();
     const t = Math.max(0, (ts - st.beepAt - S.latency) / 1000);
     st.drill = 'done';
-    recordRep({ t, zone: hit.zone, u: hit.u, v: hit.v, early: false, mv });
-    clock.classList.remove('live-over'); parVisual(t);
+    recordRep({ t, zone: hit.zone, u: hit.u, v: hit.v, early: false, mv, hitTarget: hit.hit });
+    clock.classList.remove('live-over'); parVisual(t); showCallout(null);
     showTime(t); showZone(hit.zone);
-    if(mv != null) repLabel.textContent = 'Rep ' + st.rep + ' \u00b7 moved ' + mv.toFixed(2) + ' in';
-    setStatus('Rep ' + st.rep + ': ' + fmt(t) + ' s, ' + (hit.zone === 'Hit' ? 'hit (not calibrated)' : hit.zone) + (mv != null ? ', dot moved ' + mv.toFixed(2) + ' in during the press' : '') + '.');
+    repLabel.textContent = 'Rep ' + st.rep + (S.nTargets > 1 ? ' \u00b7 T' + (st.called + 1) : '') + (mv != null ? ' \u00b7 moved ' + mv.toFixed(2) + ' in' : '');
+    setStatus('Rep ' + st.rep + ': ' + fmt(t) + ' s, ' + (hit.zone === 'Hit' ? 'hit (not calibrated)' : hit.zone === 'Wrong' ? 'wrong target (hit ' + (hit.hit + 1) + ', called ' + (st.called + 1) + ')' : hit.zone) + (mv != null ? ', dot moved ' + mv.toFixed(2) + ' in during the press' : '') + '.');
     if(S.auto) scheduleNext(); else btnDrill.textContent = 'Start drill';
   } else if(st.drill === 'standby'){
     clearTimers(); stopClock();
     st.drill = 'done';
-    recordRep({ t: null, zone: hit.zone, u: hit.u, v: hit.v, early: true, mv });
+    recordRep({ t: null, zone: hit.zone, u: hit.u, v: hit.v, early: true, mv, hitTarget: hit.hit });
     showZone('Early');
     setStatus('Rep ' + st.rep + ': shot before the beep.');
     if(S.auto) scheduleNext(); else btnDrill.textContent = 'Start drill';
@@ -794,6 +950,7 @@ function onAudioEvent(e){
     if(st.drill === 'listening' && e.peak >= S.clickThr) setStatus('A sound during the par beep was ignored. Turn off the par beep in Settings to avoid this.');
     return;
   }
+  if(st.drill === 'listening' && st.speechGate && tp >= st.speechGate[0] && tp <= st.speechGate[1]) return;   // spoken callout
   if(st.learn){ setTimeout(() => learnIfAimed(e, tp), 150); return; }
   if(S.mode !== 'always' || e.peak < S.clickThr) return;
   if(tp - st.lastClickAt < DEBOUNCE_MS) return;
@@ -810,25 +967,30 @@ function dotAt(tp, lo, hi){
   }
   return best;
 }
-function inches(a, b){
-  if(!st.H) return null;
-  const p = applyH(st.H, a.x, a.y), q = applyH(st.H, b.x, b.y);
+function refTarget(pt){
+  if(!calibrated()) return null;
+  if(st.called != null) return st.targets[st.called].H;
+  const hs = Hs();
+  for(const Hm of hs){ const uv = applyH(Hm, pt.x, pt.y); if(Math.abs(uv[0] - 0.5) <= 0.5 && Math.abs(uv[1] - 0.5) <= 0.5) return Hm; }
+  return hs[0];
+}
+function inches(a, b, Hm){
+  if(!Hm) return null;
+  const p = applyH(Hm, a.x, a.y), q = applyH(Hm, b.x, b.y);
   return Math.hypot((p[0] - q[0]) * S.targetW, (p[1] - q[1]) * S.targetH);
 }
 function handleClick(tp){
   const at = dotAt(tp, -120, 40);
   const before = dotAt(tp - 120, -100, 50);
-  const mv = (at && before) ? inches(before, at) : null;
-  st.lastTrace = st.H ? st.dotBuf.filter(s => s.x != null && s.t >= tp - 400 && s.t <= tp + 40).map(s => applyH(st.H, s.x, s.y)) : [];
+  const ref = at ? refTarget(at) : null;
+  const mv = (at && before) ? inches(before, at, ref) : null;
+  st.lastTrace = ref ? st.dotBuf.filter(s => s.x != null && s.t >= tp - 400 && s.t <= tp + 40).map(s => applyH(ref, s.x, s.y)) : [];
   if(st.drill === 'listening'){
     if(!at){ setStatus('Click heard, but no laser dot in view. Still listening.'); return; }
-    if(st.H){
-      const uv = applyH(st.H, at.x, at.y);
-      if(Math.abs(uv[0] - 0.5) > 1 || Math.abs(uv[1] - 0.5) > 1){ setStatus('Ignored a sound with the dot far off the target. Still listening.'); return; }
-    }
+    if(calibrated() && !withinTargets(Hs(), st.targets.map(t => t.corners), at.x, at.y, 1)){ setStatus('Ignored a sound with the dot far off the targets. Still listening.'); return; }
     onShot(tp, at, mv);
   } else if(st.drill === 'standby'){
-    if(at && scoreHit(at.x, at.y).zone !== 'Miss') onShot(tp, at, mv);
+    if(at && onAnyPaper(at.x, at.y)) onShot(tp, at, mv);
   } else if(st.drill === 'idle'){
     if(aimedOnTarget(tp).ok && at) onShot(tp, at, mv);
   }
@@ -837,7 +999,7 @@ const AIM = { windowMs: 250, minFrac: 0.6, maxSpread: 12 };
 function aimedOnTarget(tp){
   const a = aimCheck(st.dotBuf, tp, AIM);
   if(!a.ok) return a;
-  if(st.H && scoreHit(a.at.x, a.at.y).zone === 'Miss') return { ok: false, reason: 'off target' };
+  if(!onAnyPaper(a.at.x, a.at.y)) return { ok: false, reason: 'off target' };
   return a;
 }
 function learnIfAimed(e, tp){
@@ -878,14 +1040,28 @@ $('sMode').addEventListener('change', async () => {
 // ---------------------------------------------------------------------------
 function drawOverlay(ts){
   octx.clearRect(0, 0, W, H);
-  if(st.corners.length){
-    octx.strokeStyle = '#ff7a2e'; octx.lineWidth = 2; octx.beginPath();
-    st.corners.forEach((c, i) => { if(i) octx.lineTo(c.x, c.y); else octx.moveTo(c.x, c.y); });
-    if(st.corners.length === 4) octx.closePath();
+  const live = st.drill === 'listening' || st.drill === 'done';
+  st.targets.forEach((t, ti) => {
+    const cs = t.corners;
+    if(!cs.length) return;
+    const called = live && st.called === ti && S.nTargets > 1;
+    octx.strokeStyle = called ? '#3fd37f' : '#ff7a2e'; octx.lineWidth = called ? 4 : 2; octx.beginPath();
+    cs.forEach((c, i) => { if(i) octx.lineTo(c.x, c.y); else octx.moveTo(c.x, c.y); });
+    if(cs.length === 4) octx.closePath();
     octx.stroke();
     octx.fillStyle = '#ff7a2e';
-    st.corners.forEach(c => { octx.beginPath(); octx.arc(c.x, c.y, 4, 0, Math.PI * 2); octx.fill(); });
-  }
+    cs.forEach((c, ci) => {
+      const dragging = st.drag && st.drag.ti === ti && st.drag.ci === ci;
+      octx.beginPath(); octx.arc(c.x, c.y, dragging ? 9 : 5, 0, Math.PI * 2); octx.fill();
+    });
+    if(S.nTargets > 1 && cs.length === 4){
+      const mx = (cs[0].x + cs[1].x + cs[2].x + cs[3].x) / 4, my = (cs[0].y + cs[1].y + cs[2].y + cs[3].y) / 4;
+      octx.font = 'bold 22px sans-serif'; octx.textAlign = 'center'; octx.textBaseline = 'middle';
+      octx.lineWidth = 4; octx.strokeStyle = 'rgba(0,0,0,.7)'; octx.strokeText(String(ti + 1), mx, my);
+      octx.fillStyle = '#ffffff'; octx.fillText(String(ti + 1), mx, my);
+      octx.textAlign = 'start'; octx.textBaseline = 'alphabetic';
+    }
+  });
   if(st.dot){ octx.strokeStyle = '#ffffff'; octx.lineWidth = 2; octx.beginPath(); octx.arc(st.dot.x, st.dot.y, 8, 0, Math.PI * 2); octx.stroke(); }
   if(st.lastHit && ts - st.lastHitAt < 2000){ octx.strokeStyle = '#ff7a2e'; octx.lineWidth = 3; octx.beginPath(); octx.arc(st.lastHit.px, st.lastHit.py, 12, 0, Math.PI * 2); octx.stroke(); }
   if(st.flooded){
@@ -921,7 +1097,8 @@ function drawMap(){
 // Session log
 // ---------------------------------------------------------------------------
 function recordRep(r){
-  const rep = { n: st.rep, t: r.t, zone: r.zone, u: r.u, v: r.v, early: !!r.early, mv: r.mv == null ? null : Math.round(r.mv * 100) / 100, par: S.par, mode: S.mode, at: new Date().toISOString() };
+  const rep = { n: st.rep, t: r.t, zone: r.zone, u: r.u, v: r.v, early: !!r.early, mv: r.mv == null ? null : Math.round(r.mv * 100) / 100, par: S.par, mode: S.mode,
+    target: st.called == null ? null : st.called + 1, targets: S.nTargets, hitTarget: r.hitTarget == null || r.hitTarget < 0 ? null : r.hitTarget + 1, at: new Date().toISOString() };
   st.session.push(rep);
   history.push(rep);
   if(history.length > 500) history = history.slice(-500);
@@ -961,8 +1138,9 @@ function renderAnalysis(){
   const vert = a.biasY == null ? dash : Math.abs(a.biasY).toFixed(1) + ' in ' + (a.biasY >= 0 ? 'high' : 'low');
   const horz = a.biasX == null ? dash : Math.abs(a.biasX).toFixed(1) + ' in ' + (a.biasX >= 0 ? 'right' : 'left');
   anaGrid.innerHTML = cell('Average', sec(a.avg)) + cell('Best', sec(a.best)) + cell('Under par', a.timed ? a.underPar + '/' + a.timed : dash)
-    + cell('A / C / D', z.A + ' / ' + z.C + ' / ' + z.D) + cell('Miss / none', (z.Miss + z.Early) + ' / ' + z['No shot']) + cell('Movement', inch(a.mvMedian))
+    + cell('A / C / D', z.A + ' / ' + z.C + ' / ' + z.D) + cell('Miss / wrong / none', (z.Miss + z.Early) + ' / ' + z.Wrong + ' / ' + z['No shot']) + cell('Movement', inch(a.mvMedian))
     + cell('Vertical', vert) + cell('Horizontal', horz) + cell('Spread', a.spreadY == null ? dash : a.spreadX.toFixed(1) + '\u00d7' + a.spreadY.toFixed(1) + ' in');
+  $('anaTargets').innerHTML = a.perTarget ? a.perTarget.map(p => '<div><span>Target ' + p.target + '</span><span>' + (p.avg == null ? '\u2014' : p.avg.toFixed(2) + ' s') + ' \u00b7 ' + p.hits + '/' + p.n + ' hits</span></div>').join('') : '';
   anaNotes.innerHTML = a.notes.map(t => '<li>' + t + '</li>').join('');
   if(a.suggestedPar != null && Math.abs(a.suggestedPar - S.par) > 0.001){
     btnPar.hidden = false; btnPar.textContent = 'Set par to ' + a.suggestedPar.toFixed(2) + ' s'; btnPar.dataset.par = a.suggestedPar;
