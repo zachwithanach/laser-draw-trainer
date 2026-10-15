@@ -67,7 +67,7 @@ The panel also writes coaching notes for vertical or horizontal stringing, offse
 
 ## Hosting
 
-GitHub Pages deploys `main` through `.github/workflows/static.yml`. Every push redeploys in one to two minutes.
+GitHub Pages deploys from the `main` branch root (**Settings → Pages → Deploy from a branch**). Every push redeploys in one to two minutes. Do not add a second Pages workflow; two deployers race on each push and one fails with "in progress deployment."
 
 The page needs a normal HTTPS origin for camera and microphone access. Sandboxed hosts such as claude.ai artifact pages block the camera and fail with `NotAllowedError`.
 
