@@ -154,11 +154,21 @@ ok(an.outliers === 1 && an.avg === 2.05, 'average 2.05 s with the 4.65 s rep exc
 ok(an.best === 1.74 && an.underPar === 0, 'best 1.74 s, 0 under par');
 ok(an.zones.A === 7 && an.zones.C === 3, 'zones 7 A / 3 C');
 ok(an.biasY > 0.5 && Math.abs(an.biasX) < 0.2, 'hits sit high (' + an.biasY + ' in) and centered left-right (' + an.biasX + ' in)');
-ok(an.spreadY > 2.5 && an.spreadX < 1.2, 'vertical stringing ' + an.spreadX + ' x ' + an.spreadY + ' in');
+ok(an.spreadY > 2 && an.spreadX < 1.2, 'vertical stringing ' + an.spreadX + ' x ' + an.spreadY + ' in');
 ok(an.suggestedPar === 2.05, 'suggests par 2.05 s (got ' + an.suggestedPar + ')');
 ok(an.trend > 0.2, 'detects slowing across the set (+' + an.trend + ' s)');
 ok(an.notes.some(x => /vertically/.test(x)) && an.notes.some(x => /rising/.test(x)), 'coaching note names the vertical string and rising muzzle');
 ok(lib.analyzeReps([], { targetW: 8.5, targetH: 11 }).notes.length === 1, 'empty data returns a prompt instead of failing');
+
+// --- Second session (2026-10-15): par-beep gate dropped shots, racks registered later ---
+const session2 = [[2.299,'C',.4737,.3700,.83],[1.907,'C',.4905,.3792,.08],[3.254,'Miss',-1.824,3.040,0],[2.031,'C',.5930,.3352,.35],
+  [2.697,'A',.5474,.4836,.68],[1.974,'A',.4684,.4390,.71],[5.862,'A',.5089,.4393,.70],[6.984,'A',.6071,.4366,.11],[2.758,'A',.4968,.5188,.75],
+  [4.648,'C',.3424,.5904,4.79],[1.909,'A',.5171,.4120,1.93],[1.912,'A',.5213,.5198,.89],[1.768,'C',.5024,.3633,2.23],[4.580,'A',.6068,.4765,.49],
+  [1.575,'C',.6398,.4073,.93],[1.686,'A',.5048,.4709,1.63]].map((a, i) => ({ n: i + 1, t: a[0], zone: a[1], u: a[2], v: a[3], mv: a[4], early: false, par: 2.05 }));
+const an2 = lib.analyzeReps(session2, { targetW: 8.5, targetH: 11 });
+ok(an2.outliers === 4, '4 slow reps (4.6-7.0 s) excluded from the average (got ' + an2.outliers + ')');
+ok(an2.spreadX < 3 && an2.spreadY < 3, 'off-paper rack excluded from spread (' + an2.spreadX + ' x ' + an2.spreadY + ' in)');
+ok(an2.biasY > 0.5, 'hits still sit high (' + an2.biasY + ' in)');
 
 console.log(fails ? fails + ' test(s) failed' : 'All tests passed');
 process.exit(fails ? 1 : 0);

@@ -32,6 +32,10 @@ Keep all live ammunition out of the room for every session.
 
 Zones are circles centred on the target: A (15% of target width), C (30%), D (on paper), Miss (off paper). Set the target size in Settings. The hit map draws the last 400 ms of dot travel before the most recent shot.
 
+## Par cue
+
+The bar under the timer fills from the start beep to par. It is green while you are under par and turns red, along with the timer and the frame around the camera view, once par passes. After the shot, the frame stays green or red to show the result.
+
 ## Analysis
 
 The **Analysis** panel summarizes **This session** or **All history**: average and best time, reps under par, zone counts, median dot movement, average vertical and horizontal offset from center, and group spread. Reps slower than 1.6 times your median are excluded from the average and called out.
@@ -43,7 +47,8 @@ The panel also writes coaching notes for vertical or horizontal stringing, offse
 - A click counts only when it is louder than the click threshold and the laser dot is in view.
 - Trigger learning and free shots outside a drill also require an aimed dot: visible in most frames of the last 250 ms, steady within 12 px, and on the paper once calibrated. Racking swings the dot, so rack noise is ignored.
 - Clicks during the start delay count as early shots only when the dot is on the paper, so holster noise is ignored.
-- The app ignores the microphone while its own beeps play.
+- The app ignores the microphone while its own beeps play. The par beep is off by default for this reason; the par bar and the green or red frame around the camera view show par instead.
+- During a rep, sounds with the dot more than one target width or height off the paper are ignored.
 - Calibrate with the gun holstered. Calibration resets the background model, and a dot in view at that moment becomes background.
 
 ## Hosting

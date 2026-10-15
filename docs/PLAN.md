@@ -12,6 +12,7 @@ Live app: https://zachwithanach.github.io/laser-draw-trainer/
 | 2026-10-13 | Tap-to-calibrate ships first. ArUco auto-calibration is a later task. |
 | 2026-10-13 | History stays in localStorage until a sync target is chosen. |
 | 2026-10-14 | Host on GitHub Pages; repo public. claude.ai artifact hosting dropped because its sandbox blocks the camera. |
+| 2026-10-15 | Par cue is visual by default. The audible par beep forces a mic gate that drops shots at par. |
 | 2026-10-15 | Cartridge is always-on. Default mode detects the shot from the striker click on the microphone and reads the dot position from the camera at that instant. Pulse mode stays available. |
 
 ## Phase 1: core (shipped)
@@ -41,6 +42,13 @@ Live app: https://zachwithanach.github.io/laser-draw-trainer/
 - [x] `analyzeReps`: outlier-trimmed average, best, under par, zones, bias and spread in inches, median movement, first-third vs last-third trend.
 - [x] Coaching notes and suggested par with a one-tap **Set par** button.
 - [x] Analysis panel with session and all-history scopes; tested against the 2026-10-15 session.
+
+## Phase 1.7: par cue (shipped)
+
+- [x] Visual par cue: par bar, live red timer over par, green or red stage frame that holds the result.
+- [x] Par beep off by default, with a one-time migration of saved settings. The beep's 0.2 s mic gate dropped shots at par in the 2026-10-15 second session.
+- [x] Status message when the par-beep gate swallows a sound during a rep.
+- [x] During a rep, sounds with the dot more than one target size off the paper are ignored.
 
 ## Phase 2: accuracy
 
