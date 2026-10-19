@@ -2,6 +2,12 @@
 
 Single-file phone web app (`index.html`) for laser dry-fire training. Plain HTML, CSS, and JavaScript. No bundler, no framework, no npm dependencies.
 
+## Global rules
+
+The file below is synced from zachwithanach/claude-config. Edit it there, never here. The rules in this file add to it.
+
+@.claude/global-rules.md
+
 ## Conventions
 
 - Keep the app in one self-contained `index.html`. External resources are limited to Google Fonts.
