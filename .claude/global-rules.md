@@ -107,3 +107,6 @@ Teams (teammates share a task list and message each other).
 - Google developer documentation style: second person, present tense,
   active voice, numbered steps for procedures, one idea per sentence.
 - Definitive answers. No hedging, no filler.
+- Never name a file, folder, document, sheet, or anything else you create
+  after Claude, Anthropic, or any AI tool, and never label created content
+  as AI-generated.
