@@ -28,6 +28,34 @@ Always-on mode also records **movement**: how far the dot travels in the 120 ms 
 
 Keep all live ammunition out of the room for every session.
 
+## Strings and hit factor
+
+Set **Drill** to **String** to shoot multi-shot strings. A string needs a trigger that resets without racking: your always-on cartridge shows the dot, and a resetting trigger device such as a DryFireMag makes the click on every press.
+
+1. Set **Shots per target**, **Power factor**, and **String par** in Settings.
+2. Tap **Start drill** and holster.
+3. On the beep, fire the set number of shots on each target, in any order. There is no callout.
+4. The string ends at the round count, or 3 s after your last shot.
+
+Scoring follows USPSA Comstock rules: the best hits on each target count, A scores 5, C scores 3 (minor) or 4 (major), D scores 1 (minor) or 2 (major), and each missing hit costs 10 points. Hit factor is points divided by string time. The zones are the A, C, and D rings described under Scoring.
+
+The Analysis panel shows average and best string time, hit factor, first-shot time, splits on one target, transitions between targets, and zone counts, with notes on slow transitions, misses, and hits outside the A zone.
+
+To try strings without a resetting trigger, tap **Simulate a string** in Settings. It runs a full string with synthetic shots, marked **Simulated** in the history and never saved.
+
+## TV screen test
+
+The TV range needs the camera to see your laser dot on a TV picture. The **TV screen test** in Settings checks that before any range work.
+
+1. Unload, keep live ammunition out of the room, and holster.
+2. Start the camera, then tap **TV screen test**.
+3. Turn the phone sideways and turn on Screen Mirroring to your TV.
+4. Aim the rear camera so the whole TV fits in the preview, then tap **Start test**.
+5. Keep the phone still while the TV flashes. The test then shows a range picture.
+6. Keep the laser off the screen until the prompt changes, then hold the dot on the center target.
+
+The test passes when the camera sees the dot in at least 90% of frames and false dots in no more than 2%. It also reports the display delay. Tap **Copy results** to share the numbers. If the dot is missed, lower the TV brightness or raise Sensitivity; if false dots appear, lower Sensitivity.
+
 ## Calibration
 
 Tap four corners per target, in order: top-left, top-right, bottom-right, bottom-left. After calibrating, drag any orange corner handle to adjust it; the outline updates live. The app saves the calibration and restores it the next time you open the camera at the same resolution. Tap **Recalibrate** whenever the phone moves.
@@ -77,6 +105,6 @@ The page needs a normal HTTPS origin for camera and microphone access. Sandboxed
 node tests/run.js
 ```
 
-The tests extract the detector, calibration, and click-detection code from `index.html` (marker comments) and run them against synthetic frames and audio. No camera or microphone needed.
+The tests extract the detector, calibration, click-detection, scoring, and screen-test code from `index.html` (marker comments) and run them against synthetic frames and audio, including a simulated string of trigger clicks. No camera or microphone needed.
 
 See `docs/PLAN.md` for the roadmap and `CLAUDE.md` for conventions and agent roles.

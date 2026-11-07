@@ -15,6 +15,11 @@ Live app: https://zachwithanach.github.io/laser-draw-trainer/
 | 2026-10-15 | Multiple targets use separate calibrated sheets. Callout order is beep, then spoken number; the timer starts at the beep. A hit on the wrong target is its own result. |
 | 2026-10-15 | Par cue is visual by default. The audible par beep forces a mic gate that drops shots at par. |
 | 2026-10-15 | Cartridge is always-on. Default mode detects the shot from the striker click on the microphone and reads the dot position from the camera at that instant. Pulse mode stays available. |
+| 2026-11-06 | Adopt four features from the Reshoot review: stage scoring, video replay, a TV range, and body tracking. Laser-measured hits stay the only scoring source; Reshoot times by sound and pose and never sees hits. |
+| 2026-11-06 | Strings use USPSA Comstock scoring with minor or major power factor. Zones stay the A, C, and D rings until the printable USPSA target ships. |
+| 2026-11-06 | Trigger reset hardware: simulate strings until a resetting trigger arrives. A Standard DryFireMag works with the always-on cartridge, because the app hears the click and never needs the striker. |
+| 2026-11-06 | TV range: the main phone draws the range in a laser-safe palette, mirrors it to the TV with AirPlay, and watches the TV with its rear camera. The screen test gates all further range work. |
+| 2026-11-06 | Body tracking runs on a spare phone or tablet, because iPhone Safari ends one camera's feed when a page opens another. Each device times from the beep it hears; pairing is by QR code, with no server. |
 
 ## Phase 1: core (shipped)
 
@@ -76,9 +81,45 @@ Live app: https://zachwithanach.github.io/laser-draw-trainer/
 
 - [ ] ui: session history charts (first-shot time and hit rate over time).
 - [ ] ui: drill presets and named sessions.
-- [ ] drills: multi-shot strings for resetting trainers.
+- [x] drills: multi-shot strings for resetting trainers (see Phase 4).
 - [ ] infra: persistent history sync.
 - [ ] infra: web app manifest and service worker for offline use and a full-screen home-screen launch.
+
+## Phase 4: stage, TV range, video, and body tracking
+
+Project plan: the Word plan delivered on 2026-11-06. Each part ships as its own branch and merges to `main` only after approval.
+
+### Stage scoring (built on branch `stage-scoring`)
+
+- [x] drills: string drill with shots per target on every target, no callout; ends at the round count or 3 s after the last shot.
+- [x] drills: Comstock scoring, minor and major power factor, 10-point misses, hit factor (`@ldt-score`).
+- [x] ui: string readout, string stats and analysis (first shot, split, transition, hit factor), string par with Set par.
+- [x] drills: Simulate a string, for use without a resetting trigger.
+- [x] drills: fix Start drill needing two taps after a finished rep with auto-repeat off.
+- [x] qa: tests for scoring, the string tracker, string analysis, and a synthetic string of trigger clicks through the click detector.
+- [ ] qa: tune the click threshold and minimum split on a real resetting trigger.
+- [ ] calibration: USPSA zone shapes, tied to the printable target in Phase 2.
+
+### TV range
+
+- [x] calibration: TV screen test: flash-based screen location, in-step check, display delay, dot detection and false dots on a moving laser-safe range picture (`@ldt-screen`).
+- [ ] qa: run the screen test on the AirPlay TV and record the results. Gates every task below.
+- [ ] drills: static range with paper targets scored in screen coordinates.
+- [ ] drills: poppers and no-shoots.
+- [ ] drills: swingers, with hit tests corrected by the measured display delay.
+- [ ] ui: stage designer.
+
+### Video replay
+
+- [ ] ui: record each string from the camera view with times and hits burned in.
+- [ ] ui: slow-motion playback and export through the share sheet.
+
+### Body tracking
+
+- [ ] detection: Shooter cam mode on a second device with MediaPipe Pose loaded from a CDN script tag.
+- [ ] drills: draw, reload, and movement times from the beep each device hears.
+- [ ] infra: QR pairing for a live link, with a one-way QR transfer as fallback.
+- [ ] ui: third-person video with the pose overlay, reusing video replay.
 
 ## Known limits
 
