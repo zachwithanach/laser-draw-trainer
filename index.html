@@ -103,6 +103,14 @@ summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:
 .history td.t{ font-family:var(--display); font-size:18px; font-weight:600; }
 .actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
 .empty{ color:var(--muted); font-size:15px; }
+.field[hidden]{ display:none; }
+.tv{ position:fixed; inset:0; z-index:50; background:#0b0f14; }
+.tv[hidden]{ display:none; }
+.tv canvas{ position:absolute; inset:0; width:100%; height:100%; }
+.tv-msg{ position:absolute; left:0; right:0; top:calc(14px + env(safe-area-inset-top,0px)); padding:0 18px; text-align:center; font-family:var(--display); font-weight:600; font-size:clamp(20px, 4vw, 40px); line-height:1.15; color:rgb(170,186,208); white-space:pre-line; pointer-events:none; }
+.tv-bar{ position:absolute; left:0; right:0; bottom:0; display:flex; gap:10px; justify-content:center; padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px)); }
+.tv-bar button{ min-width:130px; }
+.tv[data-phase="locate"] .tv-msg,.tv[data-phase="locate"] .tv-bar{ visibility:hidden; }
 @media (prefers-reduced-motion: reduce){ *{ transition:none !important; animation:none !important; } }
 @media (max-width:380px){ .clock{ font-size:72px; } .controls{ grid-template-columns:1fr 1fr; } }
 </style>
@@ -141,6 +149,9 @@ summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:
       <label class="field wide">Laser type
         <select id="sMode"><option value="always">Always on (shot = trigger click)</option><option value="pulse">Pulse (fires on trigger)</option></select>
       </label>
+      <label class="field wide">Drill
+        <select id="sDrill"><option value="draw">Draw to first shot</option><option value="string">String (needs a resetting trigger)</option></select>
+      </label>
       <label class="field">Click threshold (0.01 to 1)<input id="sClick" type="number" min="0.01" max="1" step="0.01"></label>
       <label class="field">Targets (1 to 4)<input id="sTargets" type="number" min="1" max="4" step="1"></label>
       <label class="field">Laser color
@@ -149,7 +160,12 @@ summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:
       <label class="field">Sensitivity (0 to 100)<input id="sSens" type="number" min="0" max="100" step="5"></label>
       <label class="field">Shortest start delay (s)<input id="sMin" type="number" min="0.5" max="20" step="0.5"></label>
       <label class="field">Longest start delay (s)<input id="sMax" type="number" min="0.5" max="20" step="0.5"></label>
-      <label class="field">Par time (s)<input id="sPar" type="number" min="0.3" max="10" step="0.05"></label>
+      <label class="field" data-drill="draw">Par time (s)<input id="sPar" type="number" min="0.3" max="10" step="0.05"></label>
+      <label class="field" data-drill="string">String par (s)<input id="sStringPar" type="number" min="0.5" max="60" step="0.05"></label>
+      <label class="field" data-drill="string">Shots per target (1 to 6)<input id="sPerTarget" type="number" min="1" max="6" step="1"></label>
+      <label class="field" data-drill="string">Power factor
+        <select id="sPF"><option value="minor">Minor (A 5, C 3, D 1)</option><option value="major">Major (A 5, C 4, D 2)</option></select>
+      </label>
       <label class="field">No-shot timeout (s)<input id="sTimeout" type="number" min="2" max="30" step="1"></label>
       <label class="field">Target width (in)<input id="sTW" type="number" min="2" max="48" step="0.5"></label>
       <label class="field">Target height (in)<input id="sTH" type="number" min="2" max="72" step="0.5"></label>
@@ -161,6 +177,8 @@ summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:
     <div class="actions">
       <button class="quiet" id="btnLearn">Learn trigger click</button>
       <button class="quiet" id="btnBeep">Test beep</button>
+      <button class="quiet" id="btnSim">Simulate a string</button>
+      <button class="quiet" id="btnTV">TV screen test</button>
       <button class="quiet" id="btnReset">Reset settings</button>
     </div>
   </details>
@@ -183,6 +201,16 @@ summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:
   <div class="actions">
     <button class="quiet" id="btnCopy">Copy history as JSON</button>
     <button class="quiet" id="btnClear">Clear history</button>
+  </div>
+</div>
+
+<div class="tv" id="tv" hidden data-phase="off">
+  <canvas id="tvCanvas"></canvas>
+  <div class="tv-msg" id="tvMsg" aria-live="polite"></div>
+  <div class="tv-bar">
+    <button class="primary" id="tvStart">Start test</button>
+    <button id="tvCopy" hidden>Copy results</button>
+    <button id="tvClose">Close</button>
   </div>
 </div>
 
@@ -298,6 +326,16 @@ function homographyToUnit(corners){
 function applyH(h, x, y){
   const w = h[6] * x + h[7] * y + 1;
   return [(h[0] * x + h[1] * y + h[2]) / w, (h[3] * x + h[4] * y + h[5]) / w];
+}
+// Inverse homography, normalized so the last entry is 1. Maps unit-square points back to the image.
+function invertH(h){
+  const a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], k = h[7], i = h[8] == null ? 1 : h[8];
+  const A = e * i - f * k, B = -(d * i - f * g), C = d * k - e * g;
+  const det = a * A + b * B + c * C;
+  if(Math.abs(det) < 1e-12) return null;
+  const inv = [A, -(b * i - c * k), b * f - c * e, B, a * i - c * g, -(a * f - c * d), C, -(a * k - b * g), a * e - b * d];
+  if(Math.abs(inv[8]) < 1e-12) return null;
+  return inv.map(v => v / inv[8]);
 }
 // @ldt-geom-end
 
@@ -486,10 +524,191 @@ function analyzeReps(reps, o){
 // @ldt-analysis-end
 
 // ---------------------------------------------------------------------------
+// Strings and screen test. Pure; covered by tests/run.js.
+// ---------------------------------------------------------------------------
+// @ldt-score-start
+// Comstock scoring for one string. shots: [{zone, target}] where target is the 0-based target hit (-1 for none).
+// o: { targets, perTarget, pf: 'minor'|'major', time: string time in seconds }.
+// The best `perTarget` hits on each target count; each required hit not made is a miss (-10 points).
+function scoreString(shots, o){
+  const pts = o.pf === 'major' ? { A: 5, C: 4, D: 2 } : { A: 5, C: 3, D: 1 };
+  if(shots.some(s => s.zone === 'Hit')) return null;   // uncalibrated: no zones to score
+  const zones = { A: 0, C: 0, D: 0 };
+  let points = 0, misses = 0;
+  for(let t = 0; t < o.targets; t++){
+    const best = shots.filter(s => s.target === t && pts[s.zone] != null).map(s => s.zone)
+      .sort((a, b) => pts[b] - pts[a]).slice(0, o.perTarget);
+    best.forEach(z => { zones[z]++; points += pts[z]; });
+    misses += o.perTarget - best.length;
+  }
+  const penalty = misses * 10, net = Math.max(0, points - penalty);
+  return { points, penalty, net, misses, zones, fired: shots.length, hf: o.time > 0 ? Math.round(net / o.time * 10000) / 10000 : 0 };
+}
+// Collects the shots of one string. o: { rounds, gapMs, minSplitMs }. Times are ms from the beep.
+// add() returns 'dup' for a sound within minSplitMs of the last shot, 'done' at the round count, else 'shot'.
+// idle(now) is true once a shot exists and no other shot has followed for gapMs.
+function createStringTracker(o){
+  const shots = [], minSplit = o.minSplitMs == null ? 100 : o.minSplitMs, gap = o.gapMs == null ? 3000 : o.gapMs;
+  return {
+    shots,
+    add(t, data){
+      const last = shots[shots.length - 1];
+      if(last && t - last.t < minSplit) return 'dup';
+      shots.push(Object.assign({}, data, { t: t, split: last ? t - last.t : null }));
+      return shots.length >= o.rounds ? 'done' : 'shot';
+    },
+    idle(now){ const last = shots[shots.length - 1]; return !!last && now - last.t >= gap; }
+  };
+}
+// Summarizes recorded strings and writes coaching notes. Split times in seconds.
+function analyzeStrings(strings){
+  const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+  const r2 = x => Math.round(x * 100) / 100;
+  const out = { strings: strings.length, timed: 0, avg: null, best: null, underPar: 0, first: null, split: null, bestSplit: null,
+    transition: null, hf: null, bestHf: null, zones: { A: 0, C: 0, D: 0 }, misses: 0, early: 0, noShot: 0, suggestedPar: null, notes: [] };
+  strings.forEach(s => { if(s.early) out.early++; else if(!s.shots || !s.shots.length) out.noShot++; });
+  const done = strings.filter(s => !s.early && s.t != null && s.shots && s.shots.length);
+  out.timed = done.length;
+  if(!done.length){ out.notes.push('Complete a few strings to see your analysis.'); return out; }
+  out.avg = r2(mean(done.map(s => s.t)));
+  out.best = r2(Math.min.apply(null, done.map(s => s.t)));
+  out.underPar = done.filter(s => s.t <= s.par).length;
+  out.first = r2(mean(done.map(s => s.first)));
+  const same = [], trans = [];
+  done.forEach(s => s.shots.forEach((sh, i) => {
+    if(!i || sh.split == null) return;
+    const prev = s.shots[i - 1];
+    (prev.target != null && sh.target != null && prev.target !== sh.target ? trans : same).push(sh.split);
+  }));
+  if(same.length){ out.split = r2(mean(same)); out.bestSplit = r2(Math.min.apply(null, same)); }
+  if(trans.length) out.transition = r2(mean(trans));
+  const scored = done.filter(s => s.hf != null && s.zones);
+  if(scored.length){
+    out.hf = r2(mean(scored.map(s => s.hf)));
+    out.bestHf = r2(Math.max.apply(null, scored.map(s => s.hf)));
+    scored.forEach(s => { out.zones.A += s.zones.A; out.zones.C += s.zones.C; out.zones.D += s.zones.D; out.misses += s.misses; });
+  }
+  const par = done[done.length - 1].par, n = out.notes;
+  if(out.underPar === 0 && out.avg > par){
+    out.suggestedPar = Math.round(out.avg * 20) / 20;
+    n.push('No strings beat the ' + par.toFixed(2) + ' s par. Set par to ' + out.suggestedPar.toFixed(2) + ' s, your current average, and tighten it as you beat it.');
+  } else if(done.length >= 5 && out.underPar / done.length >= 0.7){
+    out.suggestedPar = Math.round((par - 0.2) * 20) / 20;
+    n.push('You beat par on ' + out.underPar + ' of ' + done.length + ' strings. Tighten par to ' + out.suggestedPar.toFixed(2) + ' s.');
+  }
+  if(out.split != null && out.transition != null && out.transition - out.split > 0.15)
+    n.push('Transitions average ' + out.transition.toFixed(2) + ' s against ' + out.split.toFixed(2) + ' s splits on one target. Move your eyes to the next target as the last shot on the current one breaks.');
+  if(out.misses) n.push(out.misses + (out.misses > 1 ? ' misses cost ' : ' miss cost ') + out.misses * 10 + ' penalty points.');
+  const hits = out.zones.A + out.zones.C + out.zones.D;
+  if(hits >= 8 && (out.zones.C + out.zones.D) / hits > 0.4)
+    n.push(Math.round((out.zones.C + out.zones.D) / hits * 100) + '% of hits landed outside the A zone. Confirm the sight picture on each shot before you press.');
+  if(!n.length) n.push('Solid set. Keep par where it is and repeat.');
+  return out;
+}
+// @ldt-score-end
+
+// @ldt-screen-start
+// Range colors for the TV picture. Blue leads every color, so neither a red nor a green laser
+// detector reads the picture as a dot.
+const RANGE_PALETTE = { bg: [18, 24, 32], berm: [40, 50, 62], target: [176, 186, 200], ring: [128, 142, 162], steel: [92, 110, 134], text: [170, 186, 208] };
+// Laser-color dominance of one color: how far its red or green channel leads the other two.
+function laserDominance(rgb){
+  const r = rgb[0], g = rgb[1], b = rgb[2];
+  return Math.max(r - Math.max(g, b), g - Math.max(r, b), 0);
+}
+// frames: [{t, lum: Uint8Array(W*H)}] captured while the TV alternates white and black.
+// Returns {corners: [TL, TR, BR, BL], area, contrast} for the region that changes, or null.
+function findScreenQuad(frames, W, H){
+  const n = W * H;
+  if(!frames || frames.length < 4) return null;
+  const means = frames.map(f => { let s = 0; for(let i = 0; i < n; i++) s += f.lum[i]; return s / n; });
+  let lo = Infinity, hi = -Infinity;
+  means.forEach(m => { if(m < lo) lo = m; if(m > hi) hi = m; });
+  if(hi - lo < 2) return null;
+  const mid = (lo + hi) / 2;
+  const bright = new Float32Array(n), dark = new Float32Array(n);
+  let nb = 0, nd = 0;
+  frames.forEach((f, k) => {
+    const acc = means[k] >= mid ? bright : dark;
+    if(acc === bright) nb++; else nd++;
+    for(let i = 0; i < n; i++) acc[i] += f.lum[i];
+  });
+  if(!nb || !nd) return null;
+  const mask = new Uint8Array(n), diff = new Float32Array(n);
+  let peak = 0;
+  for(let i = 0; i < n; i++){ diff[i] = bright[i] / nb - dark[i] / nd; if(diff[i] > peak) peak = diff[i]; }
+  if(peak < 30) return null;
+  const thr = Math.max(20, peak * 0.4);
+  for(let i = 0; i < n; i++) if(diff[i] >= thr) mask[i] = 1;
+  const stack = new Int32Array(n);
+  let best = null;
+  for(let i = 0; i < n; i++){
+    if(!mask[i]) continue;
+    let sp = 0; stack[sp++] = i; mask[i] = 0;
+    const c = { n: 0, s0: Infinity, s1: -Infinity, d0: Infinity, d1: -Infinity, tl: null, br: null, tr: null, bl: null };
+    while(sp){
+      const j = stack[--sp]; c.n++;
+      const x = j % W, y = (j - x) / W, s = x + y, d = x - y;
+      if(s < c.s0){ c.s0 = s; c.tl = { x: x, y: y }; }
+      if(s > c.s1){ c.s1 = s; c.br = { x: x + 1, y: y + 1 }; }
+      if(d > c.d1){ c.d1 = d; c.tr = { x: x + 1, y: y }; }
+      if(d < c.d0){ c.d0 = d; c.bl = { x: x, y: y + 1 }; }
+      if(x > 0 && mask[j - 1]){ mask[j - 1] = 0; stack[sp++] = j - 1; }
+      if(x < W - 1 && mask[j + 1]){ mask[j + 1] = 0; stack[sp++] = j + 1; }
+      if(y > 0 && mask[j - W]){ mask[j - W] = 0; stack[sp++] = j - W; }
+      if(y < H - 1 && mask[j + W]){ mask[j + W] = 0; stack[sp++] = j + W; }
+    }
+    if(!best || c.n > best.n) best = c;
+  }
+  if(!best || best.n < n * 0.02) return null;
+  return { corners: [best.tl, best.tr, best.br, best.bl], area: best.n / n, contrast: Math.round(peak) };
+}
+// samples: [{t, v}] mean brightness inside the screen per camera frame, in time order.
+// switches: [{t, on}] times the picture turned white (on) or black.
+// For each switch after the first, finds the first frame that shows the new level.
+// Returns { delay: median ms, matched: switches seen, spread: max - min ms }.
+function flashSync(samples, switches){
+  const none = { delay: null, matched: 0, spread: null };
+  if(!samples || samples.length < 4 || !switches || switches.length < 2) return none;
+  let lo = Infinity, hi = -Infinity;
+  samples.forEach(s => { if(s.v < lo) lo = s.v; if(s.v > hi) hi = s.v; });
+  if(hi - lo < 10) return none;
+  const mid = (lo + hi) / 2, ds = [];
+  for(let k = 1; k < switches.length; k++){   // the level before the first switch is unknown
+    const sw = switches[k];
+    let prev = null;
+    for(const s of samples){
+      if(s.t < sw.t){ prev = s.v; continue; }
+      const isNew = sw.on ? s.v >= mid : s.v < mid;
+      if(isNew){
+        const wasOld = prev != null && (sw.on ? prev < mid : prev >= mid);
+        if(wasOld && s.t - sw.t < 1500) ds.push(s.t - sw.t);
+        break;
+      }
+      prev = s.v;
+    }
+  }
+  if(!ds.length) return none;
+  ds.sort((a, b) => a - b);
+  const m = ds.length >> 1;
+  return { delay: Math.round(ds.length % 2 ? ds[m] : (ds[m - 1] + ds[m]) / 2), matched: ds.length, spread: Math.round(ds[ds.length - 1] - ds[0]) };
+}
+// Median display delay in ms, or null when fewer than two switches were seen.
+function estimateDelay(samples, switches){
+  const r = flashSync(samples, switches);
+  return r.matched >= 2 ? r.delay : null;
+}
+// True when the region flashed in step with the test: most switches seen with a steady delay.
+function inStep(sync, switches){
+  return sync.matched >= Math.max(2, switches.length - 3) && sync.spread != null && sync.spread <= 200;
+}
+// @ldt-screen-end
+
+// ---------------------------------------------------------------------------
 // Settings and storage
 // ---------------------------------------------------------------------------
-const DEFAULTS = { mode: 'always', clickThr: 0.15, color: 'red', sens: 60, minDelay: 2, maxDelay: 5, par: 1.5, timeout: 8, targetW: 8.5, targetH: 11, latency: 0, repeatDelay: 6, parBeep: false, auto: true, nTargets: 1, ver: 2 };
-const LS_SET = 'ldt.settings', LS_HIST = 'ldt.history', LS_CAL = 'ldt.calibration';
+const DEFAULTS = { mode: 'always', clickThr: 0.15, color: 'red', sens: 60, minDelay: 2, maxDelay: 5, par: 1.5, timeout: 8, targetW: 8.5, targetH: 11, latency: 0, repeatDelay: 6, parBeep: false, auto: true, nTargets: 1, drill: 'draw', perTarget: 2, pf: 'minor', stringPar: 3, ver: 2 };
+const LS_SET = 'ldt.settings', LS_HIST = 'ldt.history', LS_CAL = 'ldt.calibration', LS_TV = 'ldt.tvtest';
 function lsGet(k, fallback){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; }catch(e){ return fallback; } }
 function lsSet(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 const S = Object.assign({}, DEFAULTS, lsGet(LS_SET, {}));
@@ -508,7 +727,8 @@ const octx = overlay.getContext('2d');
 const work = document.createElement('canvas');
 const wctx = work.getContext('2d', { willReadFrequently: true });
 
-const fields = { mode: 'sMode', clickThr: 'sClick', nTargets: 'sTargets', color: 'sColor', sens: 'sSens', minDelay: 'sMin', maxDelay: 'sMax', par: 'sPar', timeout: 'sTimeout', targetW: 'sTW', targetH: 'sTH', latency: 'sLat', repeatDelay: 'sRepeat', parBeep: 'sParBeep', auto: 'sAuto' };
+const fields = { mode: 'sMode', clickThr: 'sClick', nTargets: 'sTargets', color: 'sColor', sens: 'sSens', minDelay: 'sMin', maxDelay: 'sMax', par: 'sPar', timeout: 'sTimeout', targetW: 'sTW', targetH: 'sTH', latency: 'sLat', repeatDelay: 'sRepeat', parBeep: 'sParBeep', auto: 'sAuto',
+  drill: 'sDrill', perTarget: 'sPerTarget', pf: 'sPF', stringPar: 'sStringPar' };
 function loadFields(){
   for(const k in fields){ const el = $(fields[k]); if(el.type === 'checkbox') el.checked = !!S[k]; else el.value = S[k]; }
 }
@@ -518,19 +738,27 @@ for(const k in fields){
     if(el.type === 'checkbox') S[k] = el.checked;
     else if(el.tagName === 'SELECT') S[k] = el.value;
     else { const v = parseFloat(el.value); S[k] = isFinite(v) ? v : DEFAULTS[k]; el.value = S[k]; }
+    if(k === 'perTarget'){ S.perTarget = Math.max(1, Math.min(6, Math.round(S.perTarget) || 2)); el.value = S.perTarget; }
     lsSet(LS_SET, S); drawMap();
+    if(k === 'drill'){ if(st.drill !== 'idle') stopDrill(); syncDrillFields(); renderStats(); renderAnalysis(); }
   });
 }
 loadFields();
+function syncDrillFields(){
+  document.querySelectorAll('[data-drill]').forEach(el => { el.hidden = el.dataset.drill !== S.drill; });
+}
+syncDrillFields();
+const curPar = () => S.drill === 'string' ? S.stringPar : S.par;
+const rounds = () => S.nTargets * S.perTarget;
 
 // ---------------------------------------------------------------------------
 // Runtime state
 // ---------------------------------------------------------------------------
-const DEBOUNCE_MS = 150;
+const DEBOUNCE_MS = 150, MIN_SPLIT_MS = 100, STRING_GAP_MS = 3000, STRING_MAX_MS = 60000;
 let W = 320, H = 240, det = null, srcW = 0, srcH = 0;
 const st = { camOn: false, dotOn: false, dotSince: 0, dot: null, lastShotAt: -1e9, lastHit: null, lastHitAt: 0, flooded: false,
   calibrating: false, calTi: 0, targets: [], drag: null, called: null, recentCalls: [], speechGate: null, drill: 'idle', rep: 0, beepAt: 0, timers: [], session: [],
-  dotBuf: [], lastClickAt: -1e9, gates: [], learn: null, mic: null, lastTrace: [] };
+  dotBuf: [], lastClickAt: -1e9, gates: [], learn: null, mic: null, lastTrace: [], string: null, sim: false, noShotTimer: 0, gapTimer: 0 };
 
 const fmt = t => t.toFixed(2);
 function setStatus(msg){ statusEl.textContent = msg; }
@@ -538,8 +766,8 @@ function showZone(z){ zoneEl.textContent = (z === 'A' || z === 'C' || z === 'D')
 function showTime(t){
   clock.innerHTML = fmt(t) + '<small>s</small>';
   const done = st.drill === 'done';
-  clock.classList.toggle('under', done && t > 0 && t <= S.par);
-  clock.classList.toggle('over', done && t > S.par);
+  clock.classList.toggle('under', done && t > 0 && t <= curPar());
+  clock.classList.toggle('over', done && t > curPar());
 }
 function timer(fn, ms){ const id = setTimeout(fn, ms); st.timers.push(id); return id; }
 function clearTimers(){ st.timers.forEach(id => clearTimeout(id)); st.timers = []; }
@@ -622,12 +850,14 @@ function processFrame(ts){
   if(!st.camOn) return;
   if(video.videoWidth && (video.videoWidth !== srcW || video.videoHeight !== srcH)){
     initBuffers(); setStatus('Camera orientation changed. Calibrate again.');
+    if(tv.on && tv.phase !== 'intro' && tv.phase !== 'done' && tv.phase !== 'fail') tvFail('The phone moved or rotated during the test. Hold it still, then tap Try again.');
   }
   if(!det) return;
   wctx.drawImage(video, 0, 0, W, H);
   const d = wctx.getImageData(0, 0, W, H).data;
   const res = det.run(d, { sens: S.sens, color: S.color });
   st.flooded = res.flooded;
+  if(tv.on){ tvFrame(ts, d, res); return; }
   st.dotBuf.push({ t: ts, x: res.blob ? res.blob.x : null, y: res.blob ? res.blob.y : null });
   while(st.dotBuf.length && st.dotBuf[0].t < ts - 2000) st.dotBuf.shift();
   if(res.blob){
@@ -756,7 +986,7 @@ function startClock(){
   const tick = () => {
     if(st.drill !== 'listening') return;
     const e = Math.max(0, (performance.now() - st.beepAt) / 1000);
-    showTime(e); parVisual(e); clock.classList.toggle('live-over', e > S.par);
+    showTime(e); parVisual(e); clock.classList.toggle('live-over', e > curPar());
     clockRaf = requestAnimationFrame(tick);
   };
   clockRaf = requestAnimationFrame(tick);
@@ -764,8 +994,8 @@ function startClock(){
 function stopClock(){ cancelAnimationFrame(clockRaf); }
 const parBar = $('parBar'), parFill = $('parFill');
 function parVisual(e){
-  const over = e > S.par;
-  parFill.style.width = Math.min(100, e / S.par * 100) + '%';
+  const over = e > curPar();
+  parFill.style.width = Math.min(100, e / curPar() * 100) + '%';
   parBar.classList.toggle('over', over);
   stage.classList.toggle('par-under', !over);
   stage.classList.toggle('par-over', over);
@@ -800,44 +1030,59 @@ function showCallout(i){ calloutEl.textContent = i == null ? '' : String(i + 1);
 
 function startRep(){
   clearTimers();
+  const strings = S.drill === 'string';
   st.rep++; st.drill = 'standby';
   clearPar(); st.called = null; st.speechGate = null; showCallout(null);
-  btnDrill.textContent = 'Stop';
-  showTime(0); showZone('\u2014'); repLabel.textContent = 'Rep ' + st.rep;
-  setStatus('Standby.');
+  st.string = strings ? createStringTracker({ rounds: rounds(), gapMs: STRING_GAP_MS, minSplitMs: MIN_SPLIT_MS }) : null;
+  btnDrill.textContent = 'Stop'; btnDrill.disabled = false;
+  showTime(0); showZone('\u2014'); repLabel.textContent = (strings ? 'String ' : 'Rep ') + st.rep;
+  setStatus(st.sim ? 'Simulated string. Standby.' : 'Standby.');
   const delay = (S.minDelay + Math.random() * Math.max(0, S.maxDelay - S.minDelay)) * 1000;
   timer(() => {
-    st.called = pickTarget(S.nTargets, st.recentCalls, Math.random);
-    st.recentCalls.push(st.called); if(st.recentCalls.length > 10) st.recentCalls.shift();
+    if(!strings){
+      st.called = pickTarget(S.nTargets, st.recentCalls, Math.random);
+      st.recentCalls.push(st.called); if(st.recentCalls.length > 10) st.recentCalls.shift();
+    }
     st.beepAt = beep(1800, 0.12);
     const lead = Math.max(0, st.beepAt - performance.now());
-    if(S.nTargets > 1){
+    if(!strings && S.nTargets > 1){
       setTimeout(() => sayTarget(st.called), lead + 140);
       showCallout(st.called);
       repLabel.textContent = 'Rep ' + st.rep + ' \u00b7 target ' + (st.called + 1);
     }
     st.drill = 'listening';
-    setStatus('Go.');
+    setStatus(strings ? 'Go. ' + rounds() + ' shots: ' + S.perTarget + ' on ' + (S.nTargets > 1 ? 'each of ' + S.nTargets + ' targets.' : 'the target.') : 'Go.');
     startClock();
-    if(S.parBeep) timer(() => beep(1000, 0.08), S.par * 1000 + lead);
-    timer(onTimeout, S.timeout * 1000 + lead);
+    if(S.parBeep) timer(() => beep(1000, 0.08), curPar() * 1000 + lead);
+    st.noShotTimer = timer(onTimeout, S.timeout * 1000 + lead);
+    if(strings) timer(() => finishString('max'), STRING_MAX_MS + lead);
+    if(st.sim) runSimShots(lead);
   }, delay);
 }
 function onTimeout(){
   stopClock(); st.drill = 'done';
-  recordRep({ t: null, zone: 'No shot', u: null, v: null, early: false });
+  if(st.string) recordString({ shots: [], reason: 'timeout' });
+  else recordRep({ t: null, zone: 'No shot', u: null, v: null, early: false });
   showZone('No shot');
-  setStatus('Rep ' + st.rep + ': no shot within ' + S.timeout + ' s. Tap Start drill to continue.');
-  btnDrill.textContent = 'Start drill';
+  setStatus((st.string ? 'String ' : 'Rep ') + st.rep + ': no shot within ' + S.timeout + ' s. Tap Start drill to continue.');
+  idleAfterRep();
 }
+// Leaves the drill ready for one tap on Start drill.
+function idleAfterRep(){
+  clearTimers();
+  st.drill = 'idle'; st.string = null; st.sim = false;
+  btnDrill.textContent = 'Start drill'; btnDrill.disabled = !st.camOn;
+}
+function endRep(){ if(S.auto && !st.sim) scheduleNext(); else idleAfterRep(); }
 function scheduleNext(){
   btnDrill.textContent = 'Stop';
   let left = S.repeatDelay;
-  setStatus('Next rep in ' + left + ' s. Reset the slide and holster.');
+  const word = S.drill === 'string' ? 'string' : 'rep', what = S.drill === 'string' ? 'Holster.' : 'Reset the slide and holster.';
+  setStatus('Next ' + word + ' in ' + left + ' s. ' + what);
   const tickId = setInterval(() => {
     left--;
     if(left <= 0){ clearTimeout(tickId); return; }
-    setStatus('Next rep in ' + left + ' s. Reset the slide and holster.');
+    setStatus('Next ' + word + ' in ' + left + ' s. ' + what);
   }, 1000);
   st.timers.push(tickId);
   timer(startRep, S.repeatDelay * 1000);
@@ -846,8 +1091,8 @@ function stopDrill(){
   clearTimers(); stopClock(); clearPar();
   st.called = null; st.speechGate = null; showCallout(null);
   if(st.drill !== 'idle'){ setStatus('Drill stopped.'); }
-  st.drill = 'idle';
-  btnDrill.textContent = 'Start drill';
+  st.drill = 'idle'; st.string = null; st.sim = false;
+  btnDrill.textContent = 'Start drill'; btnDrill.disabled = !st.camOn;
 }
 btnDrill.addEventListener('click', () => {
   if(st.drill === 'idle'){ ensureAudio(); unlockSpeech(); keepAwake(); startRep(); }
@@ -859,6 +1104,7 @@ function onShot(ts, blob, mv){
   const hit = scoreHit(blob.x, blob.y);
   st.lastHit = { px: blob.x, py: blob.y, u: hit.u, v: hit.v, zone: hit.zone }; st.lastHitAt = performance.now();
   st.lastMv = mv;
+  if(st.string && st.drill === 'listening'){ onStringShot(ts, hit, mv); drawMap(); return; }
   if(st.drill === 'listening'){
     clearTimers(); stopClock();
     const t = Math.max(0, (ts - st.beepAt - S.latency) / 1000);
@@ -868,14 +1114,15 @@ function onShot(ts, blob, mv){
     showTime(t); showZone(hit.zone);
     repLabel.textContent = 'Rep ' + st.rep + (S.nTargets > 1 ? ' \u00b7 T' + (st.called + 1) : '') + (mv != null ? ' \u00b7 moved ' + mv.toFixed(2) + ' in' : '');
     setStatus('Rep ' + st.rep + ': ' + fmt(t) + ' s, ' + (hit.zone === 'Hit' ? 'hit (not calibrated)' : hit.zone === 'Wrong' ? 'wrong target (hit ' + (hit.hit + 1) + ', called ' + (st.called + 1) + ')' : hit.zone) + (mv != null ? ', dot moved ' + mv.toFixed(2) + ' in during the press' : '') + '.');
-    if(S.auto) scheduleNext(); else btnDrill.textContent = 'Start drill';
+    endRep();
   } else if(st.drill === 'standby'){
     clearTimers(); stopClock();
     st.drill = 'done';
-    recordRep({ t: null, zone: hit.zone, u: hit.u, v: hit.v, early: true, mv, hitTarget: hit.hit });
+    if(st.string) recordString({ early: true });
+    else recordRep({ t: null, zone: hit.zone, u: hit.u, v: hit.v, early: true, mv, hitTarget: hit.hit });
     showZone('Early');
-    setStatus('Rep ' + st.rep + ': shot before the beep.');
-    if(S.auto) scheduleNext(); else btnDrill.textContent = 'Start drill';
+    setStatus((st.string ? 'String ' : 'Rep ') + st.rep + ': shot before the beep.');
+    endRep();
   } else {
     showZone(hit.zone);
     if(mv != null) repLabel.textContent = 'Moved ' + mv.toFixed(2) + ' in';
@@ -883,6 +1130,247 @@ function onShot(ts, blob, mv){
   }
   drawMap();
 }
+
+// ---------------------------------------------------------------------------
+// Drill: strings (multi-shot with a resetting trigger)
+// ---------------------------------------------------------------------------
+const r3 = x => Math.round(x * 1000) / 1000;
+function onStringShot(ts, hit, mv){
+  const t = ts - st.beepAt - S.latency;   // ms from the beep
+  const res = st.string.add(t, { zone: hit.zone, u: hit.u, v: hit.v, target: hit.hit, mv: mv == null ? null : Math.round(mv * 100) / 100 });
+  if(res === 'dup') return;
+  const shots = st.string.shots, last = shots[shots.length - 1];
+  if(shots.length === 1) clearTimeout(st.noShotTimer);
+  showZone(hit.zone);
+  repLabel.textContent = 'Shot ' + shots.length + ' of ' + rounds() + ' \u00b7 ' + (last.split == null ? 'first ' + fmt(Math.max(0, t) / 1000) : 'split ' + fmt(last.split / 1000)) + ' s';
+  if(res === 'done'){ finishString('rounds'); return; }
+  clearTimeout(st.gapTimer);
+  st.gapTimer = timer(() => finishString('gap'), STRING_GAP_MS);
+}
+function finishString(reason){
+  if(!st.string || st.drill !== 'listening') return;
+  clearTimers(); stopClock();
+  st.drill = 'done';
+  const rec = recordString({ shots: st.string.shots, reason });
+  clock.classList.remove('live-over');
+  if(rec.t != null){ parVisual(rec.t); showTime(rec.t); }
+  zoneEl.textContent = rec.hf != null ? 'HF ' + rec.hf.toFixed(2) : rec.shots.length + ' shot' + (rec.shots.length === 1 ? '' : 's');
+  repLabel.textContent = 'String ' + rec.n + ' \u00b7 first ' + fmt(rec.first) + ' s';
+  setStatus(stringSummary(rec));
+  drawMap();
+  endRep();
+}
+function recordString(o){
+  const raw = o.shots || [];
+  const shots = raw.map(s => ({ t: r3(Math.max(0, s.t) / 1000), split: s.split == null ? null : r3(s.split / 1000), zone: s.zone, u: s.u, v: s.v,
+    target: s.target == null || s.target < 0 ? null : s.target + 1, mv: s.mv == null ? null : s.mv }));
+  const n = shots.length, early = !!o.early;
+  const t = !early && n ? shots[n - 1].t : null;
+  const sc = t != null && calibrated() ? scoreString(raw.map(s => ({ zone: s.zone, target: s.target })), { targets: S.nTargets, perTarget: S.perTarget, pf: S.pf, time: t }) : null;
+  const rec = { kind: 'string', n: st.rep, t, first: !early && n ? shots[0].t : null, shots, rounds: rounds(), perTarget: S.perTarget, targets: S.nTargets, pf: S.pf,
+    zone: early ? 'Early' : n ? 'String' : 'No shot', early, points: sc ? sc.net : null, penalty: sc ? sc.penalty : null, misses: sc ? sc.misses : null,
+    zones: sc ? sc.zones : null, hf: sc ? sc.hf : null, par: curPar(), mode: S.mode, sim: !!st.sim, end: o.reason || null, at: new Date().toISOString() };
+  st.session.push(rec);
+  if(!rec.sim){
+    history.push(rec);
+    if(history.length > 500) history = history.slice(-500);
+    lsSet(LS_HIST, history);
+  }
+  renderStats();
+  renderAnalysis();
+  return rec;
+}
+function stringSummary(r){
+  const head = (r.sim ? 'Simulated string ' : 'String ') + r.n + ': ';
+  if(!r.shots.length) return head + 'no shots.';
+  let msg = head + r.shots.length + ' of ' + r.rounds + ' shots in ' + fmt(r.t) + ' s, first shot ' + fmt(r.first) + ' s';
+  if(r.hf != null){
+    const z = r.zones;
+    msg += ', ' + z.A + 'A ' + z.C + 'C ' + z.D + 'D' + (r.misses ? ' ' + r.misses + (r.misses > 1 ? ' misses' : ' miss') : '') + ', ' + r.points + ' points, hit factor ' + r.hf.toFixed(2) + '.';
+  } else msg += '. Calibrate the targets to score hits and hit factor.';
+  return msg;
+}
+
+// ---------------------------------------------------------------------------
+// Simulated string: synthetic shots through the same scoring path, for use without hardware
+// ---------------------------------------------------------------------------
+const btnSim = $('btnSim');
+function simPoint(tg){
+  const g = () => { let s = 0; for(let i = 0; i < 6; i++) s += Math.random(); return (s - 3) / 3; };   // roughly normal, sd 0.24
+  const miss = Math.random() < 0.06;
+  const u = miss ? (Math.random() < 0.5 ? -0.2 : 1.2) : 0.5 + g() * 0.45, v = miss ? 0.5 : 0.48 + g() * 0.4;
+  if(calibrated()){ const inv = invertH(st.targets[tg].H); if(inv){ const p = applyH(inv, u, v); return { x: p[0], y: p[1] }; } }
+  return { x: W / 2, y: H / 2 };
+}
+function runSimShots(lead){
+  const order = [];
+  for(let t = 0; t < S.nTargets; t++) for(let k = 0; k < S.perTarget; k++) order.push(t);
+  let at = lead + 1100 + Math.random() * 600;
+  order.forEach((tg, i) => {
+    if(i) at += order[i - 1] === tg ? 220 + Math.random() * 130 : 380 + Math.random() * 220;
+    timer(() => {
+      if(st.drill !== 'listening' || !st.string || !st.sim) return;
+      onShot(performance.now(), simPoint(tg), 0.1 + Math.random() * 0.5);
+    }, at);
+  });
+}
+btnSim.addEventListener('click', () => {
+  if(S.drill !== 'string'){ S.drill = 'string'; lsSet(LS_SET, S); loadFields(); syncDrillFields(); }
+  if(st.drill !== 'idle') stopDrill();
+  ensureAudio(); keepAwake();
+  st.sim = true;
+  startRep();
+});
+
+// ---------------------------------------------------------------------------
+// TV screen test: finds the mirrored TV picture, measures its delay, and checks
+// that the camera sees the laser dot on it without false dots.
+// ---------------------------------------------------------------------------
+const tvEl = $('tv'), tvCanvas = $('tvCanvas'), tvMsg = $('tvMsg'), tvStart = $('tvStart'), tvCopy = $('tvCopy'), tvClose = $('tvClose');
+const tctx = tvCanvas.getContext('2d');
+const FLASH_MS = 700, FLASHES = 8, CLEAR_MS = 6000, DOT_MS = 7000, DOT_AIM_MS = 2000, WARM_MS = 1000;
+const tv = { on: false, phase: 'off', since: 0, frames: [], switches: [], lastK: -1, quad: null, Hq: null, delay: null,
+  clear: null, dot: null, result: null, raf: 0 };
+const rgb = c => 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')';
+function tvPhase(p){ tv.phase = p; tv.since = performance.now(); tvEl.dataset.phase = p; }
+function tvSize(){
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  tvCanvas.width = Math.max(1, Math.round(innerWidth * dpr)); tvCanvas.height = Math.max(1, Math.round(innerHeight * dpr));
+}
+function openTV(){
+  if(!st.camOn){ setStatus('Start the camera, then open the TV screen test.'); return; }
+  if(st.drill !== 'idle') stopDrill();
+  keepAwake();
+  tv.on = true; tvEl.hidden = false; tvSize(); tvPhase('intro');
+  tvStart.hidden = false; tvStart.textContent = 'Start test'; tvCopy.hidden = true;
+  tvMsg.textContent = 'TV screen test\n1. Unload, keep live ammunition out of the room, and holster.\n2. Turn the phone sideways and turn on Screen Mirroring to your TV.\n3. Aim the rear camera so the whole TV fits in the preview.\n4. Tap Start test. It takes about 20 seconds.';
+  cancelAnimationFrame(tv.raf); tv.raf = requestAnimationFrame(tvRender);
+}
+function closeTV(){
+  tv.on = false; tvEl.hidden = true; cancelAnimationFrame(tv.raf); tvPhase('off');
+  tv.frames = [];
+  if(det) det = createDetector(W, H);
+  setStatus(tv.result ? 'TV screen test: ' + (tv.result.pass ? 'pass.' : 'not yet. Open the test again for details.') : '');
+}
+function tvRender(now){
+  if(!tv.on) return;
+  const c = tctx, w = tvCanvas.width, h = tvCanvas.height, el = performance.now() - tv.since;
+  if(tv.phase === 'intro'){
+    c.fillStyle = rgb(RANGE_PALETTE.bg); c.fillRect(0, 0, w, h);
+    if(video.videoWidth){
+      const bw = w * 0.5, bh = Math.min(h * 0.5, bw * video.videoHeight / video.videoWidth), bx = (w - bw) / 2, by = h * 0.42;
+      c.drawImage(video, bx, by, bw, bh);
+      c.strokeStyle = rgb(RANGE_PALETTE.text); c.lineWidth = 3; c.strokeRect(bx, by, bw, bh);
+    }
+  } else if(tv.phase === 'locate'){
+    const k = Math.floor(el / FLASH_MS);
+    if(k >= FLASHES){ tvLocated(); }
+    else {
+      const on = k % 2 === 0;
+      if(k !== tv.lastK){ tv.lastK = k; tv.switches.push({ t: performance.now(), on }); }
+      c.fillStyle = on ? '#ffffff' : '#000000'; c.fillRect(0, 0, w, h);
+    }
+  } else if(tv.phase === 'clear' || tv.phase === 'dot'){
+    drawRange(c, w, h, now);
+    if(tv.phase === 'clear'){
+      tvMsg.textContent = 'TV found. Keep the laser off the screen.\n' + Math.max(0, Math.ceil((CLEAR_MS - el) / 1000)) + ' s';
+      if(el >= CLEAR_MS) tvPhase('dot');
+    } else {
+      tvMsg.textContent = 'Hold the laser dot on the center target.\n' + Math.max(0, Math.ceil((DOT_MS - el) / 1000)) + ' s';
+      if(el >= DOT_MS) tvFinish();
+    }
+  } else {
+    c.fillStyle = rgb(RANGE_PALETTE.bg); c.fillRect(0, 0, w, h);
+  }
+  if(tv.on) tv.raf = requestAnimationFrame(tvRender);
+}
+function drawRange(c, w, h, now){
+  const P = RANGE_PALETTE;
+  c.fillStyle = rgb(P.bg); c.fillRect(0, 0, w, h);
+  c.fillStyle = rgb(P.berm); c.fillRect(0, h * 0.7, w, h * 0.3);
+  const tw = Math.min(w * 0.14, h * 0.24), th = tw * 1.55;
+  [0.22, 0.5, 0.78].forEach((fx, i) => {
+    const cx = w * fx, top = h * 0.66 - th;
+    c.fillStyle = rgb(P.target); c.beginPath();
+    c.moveTo(cx - tw * 0.18, top); c.lineTo(cx + tw * 0.18, top); c.lineTo(cx + tw * 0.18, top + th * 0.16);
+    c.lineTo(cx + tw * 0.5, top + th * 0.3); c.lineTo(cx + tw * 0.5, top + th * 0.85); c.lineTo(cx + tw * 0.3, top + th);
+    c.lineTo(cx - tw * 0.3, top + th); c.lineTo(cx - tw * 0.5, top + th * 0.85); c.lineTo(cx - tw * 0.5, top + th * 0.3);
+    c.lineTo(cx - tw * 0.18, top + th * 0.16); c.closePath(); c.fill();
+    c.strokeStyle = rgb(P.ring); c.lineWidth = Math.max(2, tw * 0.025);
+    c.strokeRect(cx - tw * 0.17, top + th * 0.32, tw * 0.34, th * 0.36);
+    if(i === 1 && tv.phase === 'dot'){ c.strokeStyle = rgb(P.text); c.lineWidth = Math.max(3, tw * 0.04); c.strokeRect(cx - tw * 0.56, top - th * 0.04, tw * 1.12, th * 1.08); }
+  });
+  // Swinger: a steel plate on an arm, so the test also covers moving content.
+  const pivX = w * 0.5, pivY = h * 0.72, len = h * 0.2, ang = Math.sin(now / 650) * 1.1;
+  const px = pivX + Math.sin(ang) * len * 2.2, py = pivY + Math.cos(ang) * len * 0.5;
+  c.strokeStyle = rgb(P.steel); c.lineWidth = Math.max(3, w * 0.004);
+  c.beginPath(); c.moveTo(pivX, pivY); c.lineTo(px, py); c.stroke();
+  c.fillStyle = rgb(P.steel); c.beginPath(); c.arc(px, py, tw * 0.22, 0, Math.PI * 2); c.fill();
+}
+function tvFrame(ts, d, res){
+  if(tv.phase === 'locate'){
+    if(tv.frames.length >= 400) return;
+    const n = W * H, lum = new Uint8Array(n);
+    for(let i = 0, p = 0; i < n; i++, p += 4) lum[i] = (d[p] * 77 + d[p + 1] * 150 + d[p + 2] * 29) >> 8;
+    tv.frames.push({ t: ts, lum });
+    return;
+  }
+  if(tv.phase !== 'clear' && tv.phase !== 'dot') return;
+  const el = performance.now() - tv.since;
+  let uv = null;
+  if(res.blob){ const q = applyH(tv.Hq, res.blob.x, res.blob.y); if(q[0] >= 0 && q[0] <= 1 && q[1] >= 0 && q[1] <= 1) uv = q; }
+  if(tv.phase === 'clear' && el >= WARM_MS){ tv.clear.frames++; if(uv) tv.clear.hits++; }
+  else if(tv.phase === 'dot' && el >= DOT_AIM_MS){ tv.dot.frames++; if(uv){ tv.dot.seen++; tv.dot.su += uv[0]; tv.dot.sv += uv[1]; } }
+}
+function tvLocated(){
+  const q = findScreenQuad(tv.frames, W, H), Hq = q ? homographyToUnit(q.corners) : null;
+  if(!Hq){ tvFail('The camera could not find the TV picture. Aim the rear camera so the whole TV is in view, check that Screen Mirroring is on, then tap Try again.'); return; }
+  const mask = [];
+  for(let y = 0; y < H; y += 2) for(let x = 0; x < W; x += 2){ const p = applyH(Hq, x + 0.5, y + 0.5); if(p[0] > 0.1 && p[0] < 0.9 && p[1] > 0.1 && p[1] < 0.9) mask.push(y * W + x); }
+  const samples = tv.frames.map(f => { let v = 0; for(const i of mask) v += f.lum[i]; return { t: f.t, v: mask.length ? v / mask.length : 0 }; });
+  const sync = flashSync(samples, tv.switches);
+  if(!inStep(sync, tv.switches)){ tvFail('The camera saw movement, but not the TV flashing in step with the test. Check that Screen Mirroring shows this page on the TV, aim at the TV, then tap Try again.'); return; }
+  tv.quad = q; tv.Hq = Hq; tv.delay = sync.delay; tv.sync = { matched: sync.matched, of: tv.switches.length - 1, spread: sync.spread }; tv.frames = [];
+  tv.clear = { frames: 0, hits: 0 }; tv.dot = { frames: 0, seen: 0, su: 0, sv: 0 };
+  if(det) det = createDetector(W, H);   // re-learn the background on the range picture
+  tvPhase('clear');
+}
+function tvFinish(){
+  const d = tv.dot, cl = tv.clear;
+  const seenPct = d.frames ? Math.round(d.seen / d.frames * 100) : 0;
+  const falsePct = cl.frames ? Math.round(cl.hits / cl.frames * 1000) / 10 : 0;
+  const pass = d.frames > 0 && cl.frames > 0 && seenPct >= 90 && falsePct <= 2;
+  tv.result = { at: new Date().toISOString(), pass, screenAreaPct: Math.round(tv.quad.area * 100), delayMs: tv.delay, flashes: tv.sync, dotSeenPct: seenPct, dotFrames: d.frames,
+    falseDotPct: falsePct, clearFrames: cl.frames, dotAt: d.seen ? [r3(d.su / d.seen), r3(d.sv / d.seen)] : null, sens: S.sens, color: S.color, camera: pill.dataset.base || '' };
+  lsSet(LS_TV, tv.result);
+  const lines = [pass ? 'Pass. The camera sees the laser on your TV.' : 'Not yet. Adjust, then tap Run again.',
+    'Laser dot seen in ' + seenPct + '% of frames (90% needed).',
+    'False dots in ' + falsePct + '% of frames (2% allowed).',
+    'Display delay: ' + (tv.delay != null ? tv.delay + ' ms.' : 'not measured.')];
+  if(seenPct < 90) lines.push('Lower the TV brightness or raise Sensitivity in Settings.');
+  if(falsePct > 2) lines.push('Lower Sensitivity in Settings.');
+  tvMsg.textContent = lines.join('\n');
+  tvPhase('done'); tvStart.hidden = false; tvStart.textContent = 'Run again'; tvCopy.hidden = false;
+}
+function tvFail(msg){
+  tv.result = { at: new Date().toISOString(), pass: false, error: msg };
+  lsSet(LS_TV, tv.result);
+  tv.frames = [];
+  tvMsg.textContent = msg;
+  tvPhase('fail'); tvStart.hidden = false; tvStart.textContent = 'Try again'; tvCopy.hidden = false;
+}
+tvStart.addEventListener('click', () => {
+  tv.frames = []; tv.switches = []; tv.lastK = -1; tv.quad = null; tv.Hq = null; tv.delay = null; tv.result = null;
+  tvStart.hidden = true; tvCopy.hidden = true; tvMsg.textContent = '';
+  tvPhase('locate');
+});
+tvCopy.addEventListener('click', async () => {
+  try{ await navigator.clipboard.writeText(JSON.stringify(tv.result, null, 2)); tvCopy.textContent = 'Copied'; setTimeout(() => { tvCopy.textContent = 'Copy results'; }, 1500); }
+  catch(e){ tvCopy.textContent = 'Clipboard blocked'; }
+});
+tvClose.addEventListener('click', closeTV);
+window.addEventListener('resize', () => { if(tv.on) tvSize(); });
+$('btnTV').addEventListener('click', openTV);
 
 // ---------------------------------------------------------------------------
 // Microphone: trigger-click shots for always-on lasers
@@ -952,8 +1440,9 @@ function onAudioEvent(e){
   }
   if(st.drill === 'listening' && st.speechGate && tp >= st.speechGate[0] && tp <= st.speechGate[1]) return;   // spoken callout
   if(st.learn){ setTimeout(() => learnIfAimed(e, tp), 150); return; }
+  if(st.sim) return;   // a simulated string supplies its own shots
   if(S.mode !== 'always' || e.peak < S.clickThr) return;
-  if(tp - st.lastClickAt < DEBOUNCE_MS) return;
+  if(tp - st.lastClickAt < (st.string ? MIN_SPLIT_MS : DEBOUNCE_MS)) return;
   st.lastClickAt = tp;
   // Wait for the camera frames around the click to arrive, then resolve the dot.
   setTimeout(() => handleClick(tp), 150);
@@ -1085,7 +1574,12 @@ function drawMap(){
     st.lastTrace.forEach((p, i) => { const x = p[0] * mw, y = p[1] * mh; if(i) c.lineTo(x, y); else c.moveTo(x, y); });
     c.stroke();
   }
-  const pts = st.session.filter(r => r.u != null).slice(-30);
+  let pts;
+  if(S.drill === 'string'){
+    const live = st.string && st.string.shots.length ? st.string.shots : null;
+    const last = st.session.filter(r => r.kind === 'string' && r.shots && r.shots.length).slice(-1)[0];
+    pts = (live || (last ? last.shots : [])).filter(r => r.u != null);
+  } else pts = st.session.filter(r => r.kind !== 'string' && r.u != null).slice(-30);
   pts.forEach(r => { c.fillStyle = 'rgba(228,99,26,.6)'; c.beginPath(); c.arc(r.u * mw, r.v * mh, 3.5, 0, Math.PI * 2); c.fill(); });
   if(st.lastHit && st.lastHit.u != null){
     c.fillStyle = '#e4631a'; c.beginPath(); c.arc(st.lastHit.u * mw, st.lastHit.v * mh, 5, 0, Math.PI * 2); c.fill();
@@ -1097,7 +1591,7 @@ function drawMap(){
 // Session log
 // ---------------------------------------------------------------------------
 function recordRep(r){
-  const rep = { n: st.rep, t: r.t, zone: r.zone, u: r.u, v: r.v, early: !!r.early, mv: r.mv == null ? null : Math.round(r.mv * 100) / 100, par: S.par, mode: S.mode,
+  const rep = { kind: 'draw', n: st.rep, t: r.t, zone: r.zone, u: r.u, v: r.v, early: !!r.early, mv: r.mv == null ? null : Math.round(r.mv * 100) / 100, par: S.par, mode: S.mode,
     target: st.called == null ? null : st.called + 1, targets: S.nTargets, hitTarget: r.hitTarget == null || r.hitTarget < 0 ? null : r.hitTarget + 1, at: new Date().toISOString() };
   st.session.push(rep);
   history.push(rep);
@@ -1107,33 +1601,62 @@ function recordRep(r){
   renderAnalysis();
 }
 function renderStats(){
-  const reps = st.session, timed = reps.filter(r => r.t != null);
-  const hits = reps.filter(r => r.zone === 'A' || r.zone === 'C' || r.zone === 'D' || r.zone === 'Hit');
-  const avg = timed.length ? timed.reduce((a, r) => a + r.t, 0) / timed.length : null;
-  const best = timed.length ? Math.min.apply(null, timed.map(r => r.t)) : null;
-  const under = timed.filter(r => r.t <= r.par).length;
-  const moved = reps.filter(r => r.mv != null);
-  const avgMv = moved.length ? moved.reduce((a, r) => a + r.mv, 0) / moved.length : null;
   const row = (k, v) => '<div class="row"><span>' + k + '</span><b>' + v + '</b></div>';
-  statsEl.innerHTML = reps.length
-    ? row('Reps', reps.length) + row('Average', avg != null ? fmt(avg) + ' s' : '\u2014') + row('Best', best != null ? fmt(best) + ' s' : '\u2014')
-      + row('Under par', timed.length ? under + ' of ' + timed.length : '\u2014') + row('Hits', hits.length + ' of ' + reps.length) + (avgMv != null ? row('Avg movement', avgMv.toFixed(2) + ' in') : '')
-    : '<div class="empty">Session stats appear here after the first rep.</div>';
-  const recent = history.slice(-20).reverse();
+  if(S.drill === 'string'){
+    const strs = st.session.filter(r => r.kind === 'string');
+    const done = strs.filter(r => !r.early && r.t != null && r.shots && r.shots.length);
+    const scored = done.filter(r => r.hf != null);
+    const avg = done.length ? done.reduce((a, r) => a + r.t, 0) / done.length : null;
+    const best = done.length ? Math.min.apply(null, done.map(r => r.t)) : null;
+    const hf = scored.length ? scored.reduce((a, r) => a + r.hf, 0) / scored.length : null;
+    statsEl.innerHTML = strs.length
+      ? row('Strings', strs.length) + row('Average', avg != null ? fmt(avg) + ' s' : '\u2014') + row('Best', best != null ? fmt(best) + ' s' : '\u2014')
+        + row('Under par', done.length ? done.filter(r => r.t <= r.par).length + ' of ' + done.length : '\u2014') + row('Hit factor', hf != null ? hf.toFixed(2) : '\u2014')
+        + row('Shots', done.reduce((a, r) => a + r.shots.length, 0))
+      : '<div class="empty">Session stats appear here after the first string.</div>';
+  } else {
+    const reps = st.session.filter(r => r.kind !== 'string'), timed = reps.filter(r => r.t != null);
+    const hits = reps.filter(r => r.zone === 'A' || r.zone === 'C' || r.zone === 'D' || r.zone === 'Hit');
+    const avg = timed.length ? timed.reduce((a, r) => a + r.t, 0) / timed.length : null;
+    const best = timed.length ? Math.min.apply(null, timed.map(r => r.t)) : null;
+    const under = timed.filter(r => r.t <= r.par).length;
+    const moved = reps.filter(r => r.mv != null);
+    const avgMv = moved.length ? moved.reduce((a, r) => a + r.mv, 0) / moved.length : null;
+    statsEl.innerHTML = reps.length
+      ? row('Reps', reps.length) + row('Average', avg != null ? fmt(avg) + ' s' : '\u2014') + row('Best', best != null ? fmt(best) + ' s' : '\u2014')
+        + row('Under par', timed.length ? under + ' of ' + timed.length : '\u2014') + row('Hits', hits.length + ' of ' + reps.length) + (avgMv != null ? row('Avg movement', avgMv.toFixed(2) + ' in') : '')
+      : '<div class="empty">Session stats appear here after the first rep.</div>';
+  }
+  const recent = history.concat(st.session.filter(r => r.sim)).sort((a, b) => a.at < b.at ? 1 : a.at > b.at ? -1 : 0).slice(0, 20);
   histEl.innerHTML = recent.length
-    ? '<table><tr><th>Time</th><th>Zone</th><th>Move</th><th>When</th></tr>' + recent.map(r => {
+    ? '<table><tr><th>Time</th><th>Result</th><th>Move</th><th>When</th></tr>' + recent.map(r => {
         const when = new Date(r.at);
         const t = r.early ? 'Early' : (r.t == null ? '\u2014' : fmt(r.t) + ' s');
-        return '<tr><td class="t">' + t + '</td><td>' + r.zone + '</td><td>' + (r.mv != null ? r.mv.toFixed(2) + ' in' : '\u2014') + '</td><td>' + when.toLocaleDateString() + ' ' + when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '</td></tr>';
+        const str = r.kind === 'string';
+        const result = str ? (r.hf != null ? 'HF ' + r.hf.toFixed(2) : r.zone) : r.zone;
+        const move = str ? (r.shots && r.shots.length ? r.shots.length + ' shot' + (r.shots.length > 1 ? 's' : '') : '\u2014') : (r.mv != null ? r.mv.toFixed(2) + ' in' : '\u2014');
+        return '<tr><td class="t">' + t + '</td><td>' + result + '</td><td>' + move + '</td><td>' + (r.sim ? 'Simulated ' : '') + when.toLocaleDateString() + ' ' + when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '</td></tr>';
       }).join('') + '</table>'
     : '';
 }
 const anaScope = $('anaScope'), anaGrid = $('anaGrid'), anaNotes = $('anaNotes'), btnPar = $('btnPar');
 function renderAnalysis(){
-  const reps = anaScope.value === 'all' ? history : st.session;
-  const a = analyzeReps(reps, { targetW: S.targetW, targetH: S.targetH });
+  const all = anaScope.value === 'all' ? history : st.session;
   const cell = (k, v) => '<div><span>' + k + '</span><b>' + v + '</b></div>';
   const dash = '\u2014', sec = v => v == null ? dash : v.toFixed(2) + ' s', inch = v => v == null ? dash : v.toFixed(2) + ' in';
+  if(S.drill === 'string'){
+    const b = analyzeStrings(all.filter(r => r.kind === 'string'));
+    const hf = v => v == null ? dash : v.toFixed(2);
+    anaGrid.innerHTML = cell('Average', sec(b.avg)) + cell('Best', sec(b.best)) + cell('Under par', b.timed ? b.underPar + '/' + b.timed : dash)
+      + cell('Hit factor', hf(b.hf)) + cell('Best HF', hf(b.bestHf)) + cell('First shot', sec(b.first))
+      + cell('Split', sec(b.split)) + cell('Transition', sec(b.transition)) + cell('A/C/D/miss', b.zones.A + '/' + b.zones.C + '/' + b.zones.D + '/' + b.misses);
+    $('anaTargets').innerHTML = '';
+    anaNotes.innerHTML = b.notes.map(t => '<li>' + t + '</li>').join('');
+    showParButton(b.suggestedPar);
+    return;
+  }
+  const reps = all.filter(r => r.kind !== 'string');
+  const a = analyzeReps(reps, { targetW: S.targetW, targetH: S.targetH });
   const z = a.zones;
   const vert = a.biasY == null ? dash : Math.abs(a.biasY).toFixed(1) + ' in ' + (a.biasY >= 0 ? 'high' : 'low');
   const horz = a.biasX == null ? dash : Math.abs(a.biasX).toFixed(1) + ' in ' + (a.biasX >= 0 ? 'right' : 'left');
@@ -1142,14 +1665,17 @@ function renderAnalysis(){
     + cell('Vertical', vert) + cell('Horizontal', horz) + cell('Spread', a.spreadY == null ? dash : a.spreadX.toFixed(1) + '\u00d7' + a.spreadY.toFixed(1) + ' in');
   $('anaTargets').innerHTML = a.perTarget ? a.perTarget.map(p => '<div><span>Target ' + p.target + '</span><span>' + (p.avg == null ? '\u2014' : p.avg.toFixed(2) + ' s') + ' \u00b7 ' + p.hits + '/' + p.n + ' hits</span></div>').join('') : '';
   anaNotes.innerHTML = a.notes.map(t => '<li>' + t + '</li>').join('');
-  if(a.suggestedPar != null && Math.abs(a.suggestedPar - S.par) > 0.001){
-    btnPar.hidden = false; btnPar.textContent = 'Set par to ' + a.suggestedPar.toFixed(2) + ' s'; btnPar.dataset.par = a.suggestedPar;
+  showParButton(a.suggestedPar);
+}
+function showParButton(p){
+  if(p != null && Math.abs(p - curPar()) > 0.001){
+    btnPar.hidden = false; btnPar.textContent = 'Set ' + (S.drill === 'string' ? 'string par' : 'par') + ' to ' + p.toFixed(2) + ' s'; btnPar.dataset.par = p;
   } else btnPar.hidden = true;
 }
 anaScope.addEventListener('change', renderAnalysis);
 btnPar.addEventListener('click', () => {
-  S.par = parseFloat(btnPar.dataset.par); lsSet(LS_SET, S); loadFields(); renderAnalysis();
-  setStatus('Par set to ' + S.par.toFixed(2) + ' s.');
+  S[S.drill === 'string' ? 'stringPar' : 'par'] = parseFloat(btnPar.dataset.par); lsSet(LS_SET, S); loadFields(); renderAnalysis();
+  setStatus((S.drill === 'string' ? 'String par' : 'Par') + ' set to ' + curPar().toFixed(2) + ' s.');
 });
 btnCopy.addEventListener('click', async () => {
   const text = JSON.stringify(history, null, 2);
@@ -1160,7 +1686,7 @@ btnClear.addEventListener('click', () => {
   history = []; st.session = []; st.lastHit = null; lsSet(LS_HIST, history);
   renderStats(); renderAnalysis(); drawMap(); setStatus('History cleared.');
 });
-btnReset.addEventListener('click', () => { Object.assign(S, DEFAULTS); lsSet(LS_SET, S); loadFields(); drawMap(); setStatus('Settings reset.'); });
+btnReset.addEventListener('click', () => { Object.assign(S, DEFAULTS); lsSet(LS_SET, S); loadFields(); syncDrillFields(); drawMap(); renderStats(); renderAnalysis(); setStatus('Settings reset.'); });
 btnCam.addEventListener('click', startCamera);
 document.addEventListener('visibilitychange', () => { if(document.hidden && st.drill !== 'idle') stopDrill(); });
 
