@@ -4,9 +4,7 @@ Single-file phone web app (`index.html`) for laser dry-fire training. Plain HTML
 
 ## Global rules
 
-The file below is synced from zachwithanach/claude-config. Edit it there, never here. The rules in this file add to it.
-
-@.claude/global-rules.md
+Global rules load from `~/.claude/CLAUDE.md`, which `install.sh` in the private claude-config repo links into place. They are not copied into this public repo. The rules in this file add to them.
 
 ## Conventions
 
