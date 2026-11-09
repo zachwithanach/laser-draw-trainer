@@ -10,7 +10,7 @@ function block(name){
   if(!m) throw new Error('Marker block not found: ' + name);
   return m[1];
 }
-const lib = new Function(block('detector') + block('geom') + block('click') + block('targets') + block('aim') + block('analysis') + block('score') + block('screen') + '\nreturn { createDetector, homographyToUnit, applyH, invertH, createClickDetector, aimCheck, analyzeReps, classifyHit, nearAnyTarget, withinTargets, pickTarget, scoreString, createStringTracker, analyzeStrings, RANGE_PALETTE, laserDominance, findScreenQuad, estimateDelay, flashSync, inStep };')();
+const lib = new Function(block('detector') + block('geom') + block('click') + block('targets') + block('aim') + block('analysis') + block('score') + block('screen') + block('reset') + '\nreturn { createDetector, homographyToUnit, applyH, invertH, createClickDetector, aimCheck, analyzeReps, classifyHit, nearAnyTarget, withinTargets, pickTarget, scoreString, createStringTracker, analyzeStrings, RANGE_PALETTE, laserDominance, findScreenQuad, estimateDelay, flashSync, inStep, learnTrigger, classifySound };')();
 
 let fails = 0;
 function ok(cond, msg){ console.log((cond ? 'PASS ' : 'FAIL ') + msg); if(!cond) fails++; }
@@ -319,6 +319,51 @@ ok(am.notes.some(x => /Target 2 averages/.test(x)), 'slow-transition note names 
   const drift = []; for(let t = 900; t < 7000; t += 1000 / 30) drift.push({ t, v: (Math.floor(t / 1130) % 2 ? 200 : 30) + (rnd() - 0.5) * 6 });
   const ds = lib.flashSync(drift, sw);
   ok(!lib.inStep(ds, sw), 'brightness that flashes out of step with the test is rejected (seen ' + ds.matched + ' of 7, spread ' + ds.spread + ' ms)');
+}
+
+
+// --- Resetting trigger: the reset click on release is not a shot ---
+{
+  const press = (t0, b, r, gap) => r == null ? [{ t: t0, peak: b }] : [{ t: t0, peak: b }, { t: t0 + gap, peak: r }];
+  const lv = lib.learnTrigger([press(0, 0.50, 0.18, 140), press(2000, 0.48, 0.20, 160), press(4000, 0.52, 0.17, 150)]);
+  ok(lv.mode === 'level' && lv.thr > 0.20 && lv.thr < 0.48 && lv.gapMs === 300, 'learn: quieter reset click sets a threshold between the clicks (' + lv.mode + ', ' + lv.thr + ')');
+  const sk = lib.learnTrigger([press(0, 0.40, 0.37, 120), press(2000, 0.38, 0.41, 180), press(4000, 0.42, 0.36, 150)]);
+  ok(sk.mode === 'skip' && sk.thr === 0.18 && sk.gapMs === 300, 'learn: equally loud reset click switches to skipping the click after each shot (' + sk.mode + ', ' + sk.thr + ', ' + sk.gapMs + ' ms)');
+  const no = lib.learnTrigger([press(0, 0.50), press(2000, 0.45), press(4000, 0.55)]);
+  ok(no.mode === 'none' && no.thr >= 0.22 && no.thr <= 0.23, 'learn: one click per press keeps the half-of-quietest threshold (' + no.thr + ')');
+  const st = { last: -1e9, due: false }, p = { mode: 'skip', thr: 0.18, gapMs: 300 };
+  const seq = [[0, 0.4], [120, 0.38], [330, 0.41], [420, 0.37], [700, 0.4], [760, 0.05]].map(a => lib.classifySound(st, a[0], a[1], p, 100));
+  ok(seq.join() === 'shot,reset,shot,reset,shot,quiet', 'filter (skip): shot and reset alternate, quiet noise ignored (' + seq.join() + ')');
+
+  // Full strings on synthetic audio: learn from 3 presses, then shoot 4 shots with a reset click 100 ms after each.
+  const sr = 48000;
+  const run = (bAmp, rAmp) => {
+    const buf = new Float32Array(sr * 12);
+    let seed = 5; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for(let i = 0; i < buf.length; i++) buf[i] = (rnd() - 0.5) * 0.006;
+    const burst = (t0, amp) => { const s0 = Math.round(t0 * sr); for(let k = 0; k < sr * 0.015; k++) buf[s0 + k] += amp * Math.exp(-k / (0.002 * sr)) * (k % 2 ? 1 : -1); };
+    [0.5, 2.5, 4.5].forEach(t0 => { burst(t0, bAmp); burst(t0 + 0.15, rAmp); });               // learning presses
+    const beep = 7, shots = [8.62, 8.91, 9.19, 9.57];
+    shots.forEach(t0 => { burst(t0, bAmp); burst(t0 + 0.10, rAmp); });                          // the string
+    const proc = lib.createClickDetector(sr), out = [];
+    for(let i = 0; i < buf.length; i += 128) proc(buf.subarray(i, i + 128), i / sr, out);
+    const clicks = out.filter(e => e.type === 'click').map(e => ({ t: e.t * 1000, peak: e.peak }));
+    const learn = clicks.filter(c => c.t < 6000), presses = [];
+    learn.forEach(c => { const last = presses[presses.length - 1]; if(last && c.t - last[last.length - 1].t <= 1000) last.push(c); else presses.push([c]); });
+    const prof = lib.learnTrigger(presses);
+    const s = { last: -1e9, due: false }, tr = lib.createStringTracker({ rounds: 4, gapMs: 3000, minSplitMs: 100 }), kinds = [];
+    clicks.filter(c => c.t > beep * 1000).forEach(c => {
+      const k = lib.classifySound(s, c.t, c.peak, { mode: prof.mode, thr: prof.thr, gapMs: prof.gapMs }, 100);
+      kinds.push(k);
+      if(k === 'shot') tr.add(c.t - beep * 1000, {});
+    });
+    return { prof, kinds, shots: tr.shots.length, splits: tr.shots.slice(1).map(x => Math.round(x.split)) };
+  };
+  const q = run(0.5, 0.18), e = run(0.45, 0.45);
+  ok(q.prof.mode === 'level' && q.shots === 4 && q.splits.join() === '290,280,380', 'DryFireMag string, quieter reset: 8 clicks give 4 shots, splits ' + q.splits.join('/') + ' ms (' + q.kinds.join(',') + ')');
+  ok(e.prof.mode === 'skip' && e.shots === 4 && e.splits.join() === '290,280,380', 'DryFireMag string, equally loud reset: 8 clicks give 4 shots, splits ' + e.splits.join('/') + ' ms (' + e.kinds.join(',') + ')');
+  const naive = run(0.45, 0.45).kinds.length;
+  ok(naive === 8, 'without the filter the same string has 8 loud clicks, so each reset would have scored as a shot');
 }
 
 console.log(fails ? fails + ' test(s) failed' : 'All tests passed');

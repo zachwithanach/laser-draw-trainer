@@ -19,6 +19,8 @@ Live app: https://zachwithanach.github.io/laser-draw-trainer/
 | 2026-11-06 | Strings use USPSA Comstock scoring with minor or major power factor. Zones stay the A, C, and D rings until the printable USPSA target ships. |
 | 2026-11-06 | Trigger reset hardware: simulate strings until a resetting trigger arrives. A Standard DryFireMag works with the always-on cartridge, because the app hears the click and never needs the striker. |
 | 2026-11-06 | TV range: the main phone draws the range in a laser-safe palette, mirrors it to the TV with AirPlay, and watches the TV with its rear camera. The screen test gates all further range work. |
+| 2026-11-09 | Stage scoring and the TV screen test shipped to `main` (ea4e464). The resetting trigger is a Standard DryFireMag. |
+| 2026-11-09 | A resetting trigger clicks twice per press: the break, then the reset on release. Learn trigger click groups the clicks by press; a reset at most 1/1.6 of the break's level is filtered by the threshold, and an equally loud reset is skipped as the first click within the reset window after each shot. |
 | 2026-11-06 | Body tracking runs on a spare phone or tablet, because iPhone Safari ends one camera's feed when a page opens another. Each device times from the beep it hears; pairing is by QR code, with no server. |
 
 ## Phase 1: core (shipped)
@@ -89,7 +91,7 @@ Live app: https://zachwithanach.github.io/laser-draw-trainer/
 
 Project plan: the Word plan delivered on 2026-11-06. Each part ships as its own branch and merges to `main` only after approval.
 
-### Stage scoring (built on branch `stage-scoring`)
+### Stage scoring (shipped 2026-11-09)
 
 - [x] drills: string drill with shots per target on every target, no callout; ends at the round count or 3 s after the last shot.
 - [x] drills: Comstock scoring, minor and major power factor, 10-point misses, hit factor (`@ldt-score`).
@@ -97,7 +99,8 @@ Project plan: the Word plan delivered on 2026-11-06. Each part ships as its own 
 - [x] drills: Simulate a string, for use without a resetting trigger.
 - [x] drills: fix Start drill needing two taps after a finished rep with auto-repeat off.
 - [x] qa: tests for scoring, the string tracker, string analysis, and a synthetic string of trigger clicks through the click detector.
-- [ ] qa: tune the click threshold and minimum split on a real resetting trigger.
+- [x] detection: filter the reset click of a resetting trigger (`@ldt-reset`): two-click learning, level and skip modes, per-shot click level and per-string reset count in the history.
+- [ ] qa: run five strings on the DryFireMag and confirm every press scores once and no reset scores; tune the threshold, reset window, and minimum split if not.
 - [ ] calibration: USPSA zone shapes, tied to the printable target in Phase 2.
 
 ### TV range

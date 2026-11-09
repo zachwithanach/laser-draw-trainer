@@ -11,7 +11,7 @@ The file below is synced from zachwithanach/claude-config. Edit it there, never 
 ## Conventions
 
 - Keep the app in one self-contained `index.html`. External resources are limited to Google Fonts.
-- Keep the detector, geometry, targets, aim, analysis, click-detector, string-scoring (`@ldt-score`), and screen-test (`@ldt-screen`) code pure (no DOM access) and inside their `// @ldt-*-start` / `// @ldt-*-end` markers. `tests/run.js` extracts those blocks. `createClickDetector` is also serialized into the AudioWorklet with `toString()`, so it must not reference anything outside its own body.
+- Keep the detector, geometry, targets, aim, analysis, click-detector, string-scoring (`@ldt-score`), screen-test (`@ldt-screen`), and reset-click (`@ldt-reset`) code pure (no DOM access) and inside their `// @ldt-*-start` / `// @ldt-*-end` markers. `tests/run.js` extracts those blocks. `createClickDetector` is also serialized into the AudioWorklet with `toString()`, so it must not reference anything outside its own body.
 - Run `node tests/run.js` after any change to detection or calibration. Add a synthetic test for every bug you fix.
 - Store state in `localStorage` with try/catch. The page must work when storage is unavailable.
 - Write UI copy in sentence case, active voice, plain verbs.
@@ -23,7 +23,7 @@ Use the subagents in `.claude/agents/`. Each owns one workstream and reports bac
 
 | Agent | Owns |
 |---|---|
-| detection | `createDetector`, `createClickDetector`, shot resolution (`handleClick`, `dotAt`) |
+| detection | `createDetector`, `createClickDetector`, reset-click filter (`@ldt-reset`), shot resolution (`handleClick`, `dotAt`) |
 | calibration | corner taps and dragging, saved calibration, homography, multi-target classification (`@ldt-targets`), TV screen location (`@ldt-screen`), ArUco |
 | drills | shot timer, par, callouts, drill state machine, strings and hit factor (`@ldt-score`) |
 | ui | layout, settings, hit map, history |

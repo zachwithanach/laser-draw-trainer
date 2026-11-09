@@ -21,7 +21,7 @@ Always-on mode also records **movement**: how far the dot travels in the 120 ms 
 2. Mount the phone so the whole target plus a margin fills the camera view. Dim the room.
 3. Open the live app in Safari or Chrome and tap **Start camera**. Allow camera and microphone access.
 4. Holster, tap **Calibrate**, then tap the target's top-left, top-right, bottom-right, and bottom-left corners. Drag any corner afterward to fine-tune it.
-5. Open **Settings**, tap **Learn trigger click**, hold the dot steady on the target, and dry-fire three times. Rack between presses; the app ignores rack noise.
+5. Open **Settings**, tap **Learn trigger click**, hold the dot steady on the target, and press and release the trigger three times, pausing between presses. Rack between presses if your trigger needs it; the app ignores rack noise.
 6. Holster and tap **Start drill**.
 7. Draw and fire on the beep. The app shows time to first shot, the zone, and the dot movement.
 8. Rack the slide and holster. The next rep starts automatically after the pause.
@@ -36,6 +36,14 @@ Set **Drill** to **String** to shoot multi-shot strings. A string needs a trigge
 2. Tap **Start drill** and holster.
 3. On the beep, fire the set number of shots on each target, in any order. There is no callout.
 4. The string ends at the round count, or 3 s after your last shot.
+
+A resetting trigger makes two clicks per press: the break, then the reset when you release. Run **Learn trigger click** with the device installed. It measures both clicks and sets **Trigger reset click**:
+
+- **Quieter than the shot:** the threshold sits between the two clicks, so the reset click never counts.
+- **As loud as the shot:** the first click within the **Reset window** after each shot counts as that press's reset.
+- **None:** one click per press, for triggers you rack.
+
+Each shot records its click level, and each string records how many reset clicks it skipped, so **Copy history as JSON** shows whether the filter worked.
 
 Scoring follows USPSA Comstock rules: the best hits on each target count, A scores 5, C scores 3 (minor) or 4 (major), D scores 1 (minor) or 2 (major), and each missing hit costs 10 points. Hit factor is points divided by string time. The zones are the A, C, and D rings described under Scoring.
 
