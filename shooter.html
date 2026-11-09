@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Shooter cam - Laser Draw Trainer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700&family=Barlow:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme:light;
+  --bg:#e4e7e2; --surface:#f6f7f4; --text:#15191b; --muted:#5d6864; --line:#bcc4bd;
+  --accent:#e4631a; --accent-ink:#ffffff; --ok:#1d8a4a; --bad:#c42a1b; --stage:#101314;
+  --display:"Barlow Condensed","Arial Narrow",Impact,sans-serif;
+  --body:"Barlow","Helvetica Neue",Arial,sans-serif;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#171b1e; --surface:#21272b; --text:#eef1ee; --muted:#95a19c; --line:#343d42;
+    --accent:#ff7a2e; --accent-ink:#15191b; --ok:#3fd37f; --bad:#ff5a47; --stage:#0d1012;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#171b1e; --surface:#21272b; --text:#eef1ee; --muted:#95a19c; --line:#343d42;
+  --accent:#ff7a2e; --accent-ink:#15191b; --ok:#3fd37f; --bad:#ff5a47; --stage:#0d1012;
+}
+html{ scroll-padding-top:env(safe-area-inset-top,0px); }
+*,*::before,*::after{ box-sizing:inherit; }
+body{ margin:0; background:var(--bg); color:var(--text); font-family:var(--body); font-size:16px; line-height:1.4; -webkit-font-smoothing:antialiased; }
+.app{ max-width:760px; margin:0 auto; padding:12px 14px 40px; }
+header{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:10px; }
+h1{ font-family:var(--display); font-weight:700; font-size:28px; margin:0; }
+h2{ font-family:var(--display); font-weight:600; font-size:20px; margin:0 0 8px; }
+.pill{ font-size:13px; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:3px 10px; white-space:nowrap; }
+.pill.on{ color:var(--ok); border-color:var(--ok); }
+.stage{ position:relative; width:100%; aspect-ratio:4/3; background:var(--stage); border-radius:10px; overflow:hidden; }
+.stage canvas{ position:absolute; inset:0; width:100%; height:100%; }
+.stage video{ position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+.readout{ display:grid; grid-template-columns:1fr auto; align-items:end; gap:8px; margin:14px 0 4px; }
+.clock{ font-family:var(--display); font-weight:700; font-size:72px; line-height:.9; font-variant-numeric:tabular-nums; }
+.clock small{ font-size:28px; font-weight:500; color:var(--muted); margin-left:4px; }
+.result{ text-align:right; font-family:var(--display); font-weight:500; font-size:20px; color:var(--muted); }
+.status{ min-height:22px; color:var(--muted); font-size:15px; }
+.controls{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin:12px 0; }
+button{ font:inherit; font-family:var(--display); font-weight:600; font-size:19px; padding:12px 8px; border-radius:8px; border:1px solid var(--line); background:var(--surface); color:var(--text); cursor:pointer; min-height:48px; }
+button.primary{ background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+button.quiet{ font-family:var(--body); font-weight:600; font-size:14px; padding:8px 12px; min-height:36px; }
+button:disabled{ opacity:.45; cursor:default; }
+button:focus-visible,input:focus-visible,select:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+details,.card{ background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:10px 14px; margin:12px 0; }
+summary{ cursor:pointer; font-family:var(--display); font-weight:600; font-size:20px; }
+.grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px 14px; margin-top:10px; }
+.field{ display:flex; flex-direction:column; gap:4px; font-size:14px; color:var(--muted); }
+.field input,.field select{ font:inherit; font-size:16px; color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px; width:100%; }
+.field.wide{ grid-column:1 / -1; }
+.field[hidden]{ display:none; }
+.check{ flex-direction:row; align-items:center; gap:8px; color:var(--text); }
+.check input{ width:20px; height:20px; }
+.rows{ font-size:15px; font-variant-numeric:tabular-nums; }
+.rows div{ display:flex; justify-content:space-between; gap:12px; padding:4px 0; border-bottom:1px solid var(--line); }
+.rows div:last-child{ border-bottom:0; }
+.rows b{ font-family:var(--display); font-weight:700; font-size:20px; }
+.rows span small{ color:var(--muted); }
+.empty{ color:var(--muted); font-size:15px; }
+#replay{ width:100%; border-radius:8px; background:var(--stage); display:block; }
+.actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center; }
+.actions a{ color:var(--accent); font-weight:600; font-size:14px; }
+.history{ max-height:260px; overflow:auto; }
+.history table{ width:100%; border-collapse:collapse; font-size:15px; font-variant-numeric:tabular-nums; }
+.history td,.history th{ text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); }
+.history th{ color:var(--muted); font-weight:600; font-size:13px; }
+@media (prefers-reduced-motion: reduce){ *{ transition:none !important; animation:none !important; } }
+@media (max-width:420px){ .clock{ font-size:56px; } .controls{ grid-template-columns:1fr 1fr; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Shooter cam</h1>
+    <span class="pill" id="pill">Camera off</span>
+  </header>
+
+  <div class="stage" id="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="view" width="640" height="480"></canvas>
+  </div>
+
+  <div class="readout">
+    <div class="clock" id="clock">0.00<small>s</small></div>
+    <div class="result" id="repLabel">No reps yet</div>
+  </div>
+  <div class="status" id="status" aria-live="polite">Place this device to your side so the camera sees you from head to knees, then start the camera.</div>
+
+  <div class="controls">
+    <button id="btnCam">Start camera</button>
+    <button id="btnHolster" disabled>Mark holster</button>
+    <button id="btnArm" class="primary" disabled>Listen for beep</button>
+  </div>
+
+  <details id="settings">
+    <summary>Settings</summary>
+    <div class="grid">
+      <label class="field">Gun hand
+        <select id="sHand"><option value="right">Right</option><option value="left">Left</option></select>
+      </label>
+      <label class="field">Start signal
+        <select id="sSource"><option value="listen">Listen for the main phone's beep</option><option value="own">This device beeps</option></select>
+      </label>
+      <label class="field">Capture length (s)<input id="sCapture" type="number" min="3" max="60" step="1"></label>
+      <label class="field">Microphone lag (ms)<input id="sLag" type="number" min="0" max="400" step="5"></label>
+      <label class="field" data-source="own">Shortest start delay (s)<input id="sMin" type="number" min="0.5" max="20" step="0.5"></label>
+      <label class="field" data-source="own">Longest start delay (s)<input id="sMax" type="number" min="0.5" max="20" step="0.5"></label>
+      <label class="field check wide"><input id="sRecord" type="checkbox"> Record a replay video of each rep</label>
+    </div>
+    <div class="actions">
+      <button class="quiet" id="btnBeep">Test beep and measure microphone lag</button>
+      <button class="quiet" id="btnReset">Reset settings</button>
+    </div>
+  </details>
+
+  <div class="card">
+    <h2>Draw</h2>
+    <div class="rows" id="drawRows"><div class="empty">Draw times appear here after the first rep.</div></div>
+  </div>
+  <div class="card">
+    <h2>Reloads and movement</h2>
+    <div class="rows" id="eventRows"><div class="empty">Reloads and moves between positions appear here.</div></div>
+  </div>
+  <div class="card" id="replayCard" hidden>
+    <h2>Replay</h2>
+    <video id="replay" controls playsinline muted></video>
+    <div class="actions">
+      <button class="quiet" data-rate="1">1x</button>
+      <button class="quiet" data-rate="0.5">0.5x</button>
+      <button class="quiet" data-rate="0.25">0.25x</button>
+      <a id="dl" download>Download video</a>
+    </div>
+  </div>
+  <div class="history" id="history"></div>
+  <div class="actions">
+    <button class="quiet" id="btnCopy">Copy history as JSON</button>
+    <button class="quiet" id="btnClear">Clear history</button>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+// ---------------------------------------------------------------------------
+// Pose analysis. Pure; no DOM access. Covered by tests/shooter.js.
+// Landmarks follow MediaPipe Pose: 11/12 shoulders, 13/14 elbows, 15/16 wrists, 23/24 hips (left/right).
+// ---------------------------------------------------------------------------
+// @ldt-pose-start
+// One camera frame -> the few points the analysis needs, in image units with x scaled by the aspect ratio.
+// lm: 33 normalized landmarks. world: 33 landmarks in meters, or null. o: { hand, aspect, minVis }.
+function poseSample(lm, world, t, o){
+  const right = o.hand !== 'left', a = o.aspect || 1, minVis = o.minVis == null ? 0.5 : o.minVis;
+  const I = right ? { s: 12, e: 14, w: 16, h: 24, sw: 15 } : { s: 11, e: 13, w: 15, h: 23, sw: 16 };
+  const seen = i => lm && lm[i] && (lm[i].visibility == null || lm[i].visibility >= minVis);
+  if(![11, 12, 23, 24, I.w, I.e].every(seen)) return { t: t, ok: false };
+  const P = i => [lm[i].x * a, lm[i].y];
+  const mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2], d = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+  const hip = mid(P(23), P(24)), sh = mid(P(11), P(12)), scale = d(hip, sh);
+  if(!(scale > 1e-4)) return { t: t, ok: false };
+  let ext;   // gun-arm extension: 1 when the arm is straight, lower as the elbow bends
+  if(world && world[I.s] && world[I.e] && world[I.w]){
+    const d3 = (p, q) => Math.hypot(p.x - q.x, p.y - q.y, (p.z || 0) - (q.z || 0));
+    ext = d3(world[I.s], world[I.w]) / ((d3(world[I.s], world[I.e]) + d3(world[I.e], world[I.w])) || 1);
+  } else ext = d(P(I.s), P(I.w)) / ((d(P(I.s), P(I.e)) + d(P(I.e), P(I.w))) || 1);
+  return { t: t, ok: true, gw: P(I.w), sw: seen(I.sw) ? P(I.sw) : null, gh: P(I.h), gs: P(I.s), hip: hip, scale: scale, ext: ext };
+}
+// Adds smoothed wrist speed (torso lengths per second, relative to the hips) and distance to the holster.
+// o.holster: [dx, dy] offset of the holstered-gun wrist from the gun-side hip, in torso lengths (default: a quarter torso above it).
+function poseSeries(samples, o){
+  const off = (o && o.holster) || [0, -0.25], out = [];
+  let sr = null;
+  samples.forEach(s => {
+    if(!s.ok) return;
+    const rel = [(s.gw[0] - s.hip[0]) / s.scale, (s.gw[1] - s.hip[1]) / s.scale];
+    sr = sr ? [sr[0] + (rel[0] - sr[0]) * 0.6, sr[1] + (rel[1] - sr[1]) * 0.6] : rel;
+    const back = out[Math.max(0, out.length - 3)], dt = back ? (s.t - back.t) / 1000 : 0;   // ~100 ms baseline rides over landmark jitter
+    const speed = back && dt > 0 ? Math.hypot(sr[0] - back.sr[0], sr[1] - back.sr[1]) / dt : 0;
+    const hx = s.gh[0] + off[0] * s.scale, hy = s.gh[1] + off[1] * s.scale;
+    const row = { t: s.t, s: s, sr: sr, speed: speed, hd: Math.hypot(s.gw[0] - hx, s.gw[1] - hy) / s.scale, above: (hy - s.gw[1]) / s.scale };
+    out.push(row);
+  });
+  return out;
+}
+// Draw phases in seconds from the beep (t0, ms). Each is null when the camera never saw it.
+// react: hand starts moving. grip: hand reaches the holster. out: gun clears the holster. on: arm extended and steady.
+function analyzeDraw(samples, t0, o){
+  o = o || {};
+  const hr = o.holsterR || 0.25, mv = o.moveThr || 1.0, st = o.steadyThr || 0.6, extOn = o.extOn || 0.88;
+  const rows = poseSeries(samples.filter(s => s.t >= t0 - 150), o);
+  const r2 = x => x == null ? null : Math.round(Math.max(0, x - t0) / 10) / 100;
+  const first = (from, test) => { for(let i = from; i < rows.length; i++) if(rows[i].t >= t0 && test(rows[i], rows[i + 1], i)) return i; return -1; };
+  const iReact = first(0, (r, n) => r.speed > mv && !!n && n.speed > mv);
+  const iGrip = first(Math.max(0, iReact), r => r.hd <= hr);
+  const iOut = iGrip < 0 ? -1 : first(iGrip + 1, r => r.hd > hr * 1.4 && r.above > 0.15);
+  const iOn = iOut < 0 ? -1 : first(iOut + 1, (r, n) => r.s.ext >= extOn && r.speed < st && !!n && n.speed < st && r.s.gw[1] <= r.s.gs[1] + 0.45 * r.s.scale);
+  const T = i => i < 0 ? null : rows[i].t;
+  const out = { react: r2(T(iReact < 0 ? -1 : Math.max(0, iReact - 2))), grip: r2(T(iGrip)), out: r2(T(iOut)), on: r2(T(iOn < 0 ? -1 : Math.max(iOut, iOn - 2))), frames: rows.length };
+  const seg = (a, b) => a == null || b == null ? null : Math.round((b - a) * 100) / 100;
+  out.toGun = out.grip; out.clear = seg(out.grip, out.out); out.present = seg(out.out, out.on);
+  return out;
+}
+// Reloads after tFrom (ms): the gun arm leaves extension, the support hand visits the belt, and the arm
+// extends and steadies again. Returns [{ at, dur }] in seconds; `at` is measured from t0.
+function findReloads(samples, tFrom, t0, o){
+  o = o || {};
+  const extOn = o.extOn || 0.88, extOff = o.extOff || 0.75, st = o.steadyThr || 0.6, maxMs = o.maxMs || 8000;
+  const rows = poseSeries(samples.filter(s => s.t >= tFrom), o), out = [];
+  let start = null, belt = false;
+  for(let i = 0; i < rows.length; i++){
+    const r = rows[i], s = r.s;
+    if(start == null){ if(s.ext < extOff){ start = r.t; belt = false; } continue; }
+    if(s.sw && Math.abs(s.sw[1] - s.hip[1]) < 0.3 * s.scale && Math.hypot(s.sw[0] - s.hip[0], s.sw[1] - s.hip[1]) < s.scale) belt = true;
+    if(r.t - start > maxMs){ start = null; continue; }
+    const n = rows[i + 1];
+    if(s.ext >= extOn && r.speed < st && n && n.speed < st && s.gw[1] <= s.gs[1] + 0.45 * s.scale){
+      if(belt && r.t - start >= 400) out.push({ at: Math.round((start - t0) / 10) / 100, dur: Math.round((r.t - start) / 10) / 100 });
+      start = null;
+    }
+  }
+  return out;
+}
+// Moves between shooting positions after tFrom (ms): the hips travel at least minDist torso lengths.
+// Returns [{ at, dur, dist }]; `at` in seconds from t0, dist in torso lengths.
+function findMoves(samples, tFrom, t0, o){
+  o = o || {};
+  const go = o.goThr || 0.8, stop = o.stopThr || 0.3, minDist = o.minDist || 0.8;
+  const ok = samples.filter(s => s.ok && s.t >= tFrom), out = [];
+  let x = null, prev = null, fast = 0, slow = 0, start = null, x0 = 0, scale = 0, cand = null;
+  ok.forEach(s => {
+    x = x == null ? s.hip[0] : x + (s.hip[0] - x) * 0.5;
+    scale = scale ? scale + (s.scale - scale) * 0.1 : s.scale;
+    if(prev){
+      const dt = (s.t - prev.t) / 1000, v = dt > 0 ? Math.abs(x - prev.x) / scale / dt : 0;
+      if(start == null){
+        if(v > go){
+          if(fast === 0) cand = { t: prev.t, x: prev.x };
+          if(++fast >= 3){ start = cand.t; x0 = cand.x; slow = 0; }
+        } else fast = 0;
+      } else if(v < stop){
+        if(++slow >= 4){
+          const dist = Math.abs(x - x0) / scale;
+          if(dist >= minDist) out.push({ at: Math.round((start - t0) / 10) / 100, dur: Math.round((s.t - start) / 10) / 100, dist: Math.round(dist * 10) / 10 });
+          start = null; fast = 0;
+        }
+      } else slow = 0;
+    }
+    prev = { t: s.t, x: x };
+  });
+  return out;
+}
+// @ldt-pose-end
+
+// ---------------------------------------------------------------------------
+// Start-beep detection. Pure; runs inside an AudioWorklet via toString().
+// Emits { type: 'beep', t, level } when a steady tone at `freq` lasts `windows` 10 ms windows.
+// ---------------------------------------------------------------------------
+// @ldt-beep-start
+function createBeepDetector(sampleRate, o){
+  o = o || {};
+  const freq = o.freq || 1800, N = Math.round(sampleRate * 0.01), need = o.windows || 5;
+  const minRms = o.minRms || 0.004, minRatio = o.minRatio || 0.35, refractory = (o.refractoryMs || 1500) / 1000;
+  const coeff = 2 * Math.cos(2 * Math.PI * freq / sampleRate);
+  let s1 = 0, s2 = 0, e = 0, n = 0, run = 0, runStart = 0, winStart = 0, last = -1e9, fired = false;
+  return function process(ch, startTime, out){
+    for(let i = 0; i < ch.length; i++){
+      if(n === 0) winStart = startTime + i / sampleRate;
+      const x = ch[i], s0 = x + coeff * s1 - s2;
+      s2 = s1; s1 = s0; e += x * x;
+      if(++n < N) continue;
+      const power = s1 * s1 + s2 * s2 - coeff * s1 * s2;
+      const ratio = e > 0 ? 2 * power / (N * e) : 0, rms = Math.sqrt(e / N);
+      if(ratio >= minRatio && rms >= minRms){
+        if(run === 0) runStart = winStart;
+        if(++run >= need && !fired && runStart - last > refractory){ fired = true; last = runStart; out.push({ type: 'beep', t: runStart, level: rms }); }
+      } else { run = 0; fired = false; }
+      s1 = 0; s2 = 0; e = 0; n = 0;
+    }
+  };
+}
+// @ldt-beep-end
+
+// ---------------------------------------------------------------------------
+// Settings and storage
+// ---------------------------------------------------------------------------
+const MP_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+const MP_WASM = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
+const MP_MODEL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+const HOLSTER_R = 0.25;
+const DEFAULTS = { hand: 'right', source: 'listen', capture: 8, minDelay: 2, maxDelay: 5, micLag: 0, record: true, holster: [0, -0.25] };
+const LS_SET = 'ldt.shooter.settings', LS_HIST = 'ldt.shooter.history';
+function lsGet(k, fallback){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; }catch(e){ return fallback; } }
+function lsSet(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+const S = Object.assign({}, DEFAULTS, lsGet(LS_SET, {}));
+let history = lsGet(LS_HIST, []);
+if(!Array.isArray(history)) history = [];
+
+const $ = id => document.getElementById(id);
+const video = $('video'), view = $('view'), vctx = view.getContext('2d'), stage = $('stage'), pill = $('pill');
+const clock = $('clock'), repLabel = $('repLabel'), statusEl = $('status');
+const btnCam = $('btnCam'), btnHolster = $('btnHolster'), btnArm = $('btnArm'), btnBeep = $('btnBeep');
+const drawRows = $('drawRows'), eventRows = $('eventRows'), replayCard = $('replayCard'), replay = $('replay'), dl = $('dl'), histEl = $('history');
+
+const fields = { hand: 'sHand', source: 'sSource', capture: 'sCapture', micLag: 'sLag', minDelay: 'sMin', maxDelay: 'sMax', record: 'sRecord' };
+function loadFields(){ for(const k in fields){ const el = $(fields[k]); if(el.type === 'checkbox') el.checked = !!S[k]; else el.value = S[k]; } }
+function syncSource(){
+  document.querySelectorAll('[data-source]').forEach(el => { el.hidden = el.dataset.source !== S.source; });
+  if(st.mode === 'idle') btnArm.textContent = S.source === 'own' ? 'Start rep' : 'Listen for beep';
+}
+for(const k in fields){
+  const el = $(fields[k]);
+  el.addEventListener('change', () => {
+    if(el.type === 'checkbox') S[k] = el.checked;
+    else if(el.tagName === 'SELECT') S[k] = el.value;
+    else { const v = parseFloat(el.value); S[k] = isFinite(v) ? v : DEFAULTS[k]; el.value = S[k]; }
+    lsSet(LS_SET, S);
+    if(k === 'source'){ if(st.mode !== 'idle') stop(); syncSource(); }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Runtime state
+// ---------------------------------------------------------------------------
+const st = { camOn: false, mode: 'idle', rep: 0, t0: 0, buf: [], last: null, lm: null, landmarker: null, mic: null,
+  timers: [], recorder: null, chunks: [], replayUrl: null, cal: null, mark: null, fps: 0, live: null };
+const fmt = t => t == null ? '\u2014' : t.toFixed(2);
+function setStatus(msg){ statusEl.textContent = msg; }
+function showTime(t){ clock.innerHTML = fmt(t) + '<small>s</small>'; }
+function timer(fn, ms){ const id = setTimeout(fn, ms); st.timers.push(id); return id; }
+function clearTimers(){ st.timers.forEach(id => clearTimeout(id)); st.timers = []; }
+function opts(){ return { holster: S.holster, holsterR: HOLSTER_R }; }
+
+// ---------------------------------------------------------------------------
+// Camera and pose model
+// ---------------------------------------------------------------------------
+async function loadPose(){
+  if(st.landmarker) return true;
+  setStatus('Loading the pose model.');
+  try{
+    const mp = await import(MP_URL);
+    const fileset = await mp.FilesetResolver.forVisionTasks(MP_WASM);
+    st.landmarker = await mp.PoseLandmarker.createFromOptions(fileset, { baseOptions: { modelAssetPath: MP_MODEL, delegate: 'GPU' }, runningMode: 'VIDEO', numPoses: 1 });
+    return true;
+  }catch(err){
+    setStatus('The pose model did not load. Check the internet connection, then reload the page.');
+    return false;
+  }
+}
+async function startCamera(){
+  if(st.camOn){ stopCamera(); return; }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ setStatus('This browser cannot open the camera. Open the page in Chrome, Edge, or Safari.'); return; }
+  ensureAudio();
+  btnCam.disabled = true; setStatus('Opening camera.');
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } } });
+    video.srcObject = stream;
+    await video.play();
+    await new Promise(res => { if(video.videoWidth) res(); else video.addEventListener('loadedmetadata', res, { once: true }); });
+    view.width = 640; view.height = Math.round(640 * video.videoHeight / video.videoWidth);
+    stage.style.aspectRatio = video.videoWidth + ' / ' + video.videoHeight;
+    if(!(await loadPose())){ stream.getTracks().forEach(t => t.stop()); video.srcObject = null; btnCam.disabled = false; return; }
+    st.camOn = true;
+    btnCam.textContent = 'Stop camera'; btnHolster.disabled = false; btnArm.disabled = false;
+    pill.textContent = video.videoWidth + 'x' + video.videoHeight; pill.classList.add('on');
+    setStatus('Stand where you will shoot. Tap Mark holster once, then ' + (S.source === 'own' ? 'tap Start rep.' : 'tap Listen for beep.'));
+    await startMic();
+    loop();
+  }catch(err){
+    setStatus('Camera failed: ' + err.name + '. Allow camera access and try again.');
+  }
+  btnCam.disabled = false;
+}
+function stopCamera(){
+  stop();
+  st.camOn = false;
+  const s = video.srcObject; if(s) s.getTracks().forEach(t => t.stop());
+  video.srcObject = null; stopMic();
+  btnCam.textContent = 'Start camera'; btnHolster.disabled = true; btnArm.disabled = true;
+  pill.textContent = 'Camera off'; pill.classList.remove('on');
+  vctx.clearRect(0, 0, view.width, view.height);
+}
+function loop(){
+  if(!st.camOn) return;
+  if('requestVideoFrameCallback' in video) video.requestVideoFrameCallback((now, meta) => { frame((meta && meta.captureTime) || now); loop(); });
+  else requestAnimationFrame(now => { frame(now); loop(); });
+}
+function frame(ts){
+  if(!st.camOn || !st.landmarker) return;
+  let res = null;
+  try{ res = st.landmarker.detectForVideo(video, performance.now()); }catch(e){ res = null; }
+  const lm = res && res.landmarks && res.landmarks[0] ? res.landmarks[0] : null;
+  const world = res && res.worldLandmarks && res.worldLandmarks[0] ? res.worldLandmarks[0] : null;
+  const s = poseSample(lm, world, ts, { hand: S.hand, aspect: video.videoWidth / video.videoHeight });
+  if(st.last) st.fps = st.fps ? st.fps + (1000 / Math.max(1, ts - st.last.t) - st.fps) * 0.1 : 30;
+  st.buf.push(s); st.last = s; st.lm = lm;
+  while(st.buf.length && st.buf[0].t < ts - 70000) st.buf.shift();
+  if(st.mark && s.ok) st.mark.push(s);
+  if(st.mode === 'capturing'){
+    st.live = analyzeDraw(st.buf, st.t0, opts());
+    showTime(Math.max(0, (performance.now() - st.t0) / 1000));
+  }
+  draw(lm, s);
+}
+
+// ---------------------------------------------------------------------------
+// Rendering: camera picture, skeleton, holster zone, and rep times, all on one canvas so the replay records them
+// ---------------------------------------------------------------------------
+const BONES = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]];
+function draw(lm, s){
+  const w = view.width, h = view.height, c = vctx;
+  c.drawImage(video, 0, 0, w, h);
+  if(lm){
+    c.lineWidth = 3; c.strokeStyle = '#ff7a2e'; c.beginPath();
+    BONES.forEach(b => { const p = lm[b[0]], q = lm[b[1]]; if(p && q && (p.visibility == null || p.visibility > 0.5) && (q.visibility == null || q.visibility > 0.5)){ c.moveTo(p.x * w, p.y * h); c.lineTo(q.x * w, q.y * h); } });
+    c.stroke();
+  }
+  if(s && s.ok){
+    const a = video.videoWidth / video.videoHeight, X = v => v / a * w, Y = v => v * h;
+    c.strokeStyle = '#ffffff'; c.lineWidth = 2; c.beginPath();
+    c.arc(X(s.gh[0] + S.holster[0] * s.scale), Y(s.gh[1] + S.holster[1] * s.scale), HOLSTER_R * s.scale * h, 0, Math.PI * 2); c.stroke();
+    c.fillStyle = '#3fd37f'; c.beginPath(); c.arc(X(s.gw[0]), Y(s.gw[1]), 6, 0, Math.PI * 2); c.fill();
+  }
+  const lines = [];
+  if(st.mode === 'capturing' || st.mode === 'done'){
+    const d = st.live || {};
+    lines.push((st.mode === 'capturing' ? fmt(Math.max(0, (performance.now() - st.t0) / 1000)) + ' s' : 'Rep ' + st.rep));
+    if(d.grip != null) lines.push('Hand on gun ' + fmt(d.grip));
+    if(d.out != null) lines.push('Gun out ' + fmt(d.out));
+    if(d.on != null) lines.push('On target ' + fmt(d.on));
+  } else if(st.mode === 'armed') lines.push('Listening for the beep');
+  else if(st.mode === 'standby') lines.push('Standby');
+  if(lines.length){
+    c.font = '600 20px sans-serif'; c.textBaseline = 'top';
+    const bw = Math.max.apply(null, lines.map(t => c.measureText(t).width)) + 20;
+    c.fillStyle = 'rgba(0,0,0,.6)'; c.fillRect(8, 8, bw, lines.length * 26 + 10);
+    c.fillStyle = '#ffffff'; lines.forEach((t, i) => c.fillText(t, 18, 14 + i * 26));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Audio: this device's own beep, and hearing the main phone's beep
+// ---------------------------------------------------------------------------
+let actx = null;
+function ensureAudio(){
+  if(!actx){ const AC = window.AudioContext || window.webkitAudioContext; if(AC) actx = new AC(); }
+  if(actx && actx.state === 'suspended') actx.resume();
+}
+function ctxToPerf(ct){
+  if(!actx) return performance.now();
+  const ts = actx.getOutputTimestamp ? actx.getOutputTimestamp() : null;
+  if(ts && ts.performanceTime) return ts.performanceTime + (ct - ts.contextTime) * 1000;
+  return performance.now() - (actx.currentTime - ct) * 1000;
+}
+// Plays the same 1800 Hz start beep as the main app and returns the time it sounds.
+function beep(){
+  ensureAudio(); if(!actx) return performance.now();
+  const t0 = actx.currentTime + 0.02, dur = 0.12;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = 'square'; o.frequency.value = 1800;
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.5, t0 + 0.005);
+  g.gain.setValueAtTime(0.5, t0 + dur - 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(actx.destination); o.start(t0); o.stop(t0 + dur + 0.02);
+  const at = ctxToPerf(t0);
+  st.cal = { at: at };
+  return at;
+}
+async function startMic(){
+  if(st.mic) return true;
+  ensureAudio();
+  if(!actx){ setStatus('Audio is unavailable in this browser.'); return false; }
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    const src = actx.createMediaStreamSource(stream), sink = actx.createGain(); sink.gain.value = 0;
+    let node;
+    if(actx.audioWorklet){
+      const code = createBeepDetector.toString() + `
+class LdtBeep extends AudioWorkletProcessor{
+  constructor(){ super(); this.p = createBeepDetector(sampleRate); this.out = []; }
+  process(inputs){
+    const ch = inputs[0] && inputs[0][0];
+    if(ch){ this.p(ch, currentTime, this.out); if(this.out.length){ for(const e of this.out) this.port.postMessage(e); this.out.length = 0; } }
+    return true;
+  }
+}
+registerProcessor('ldt-beep', LdtBeep);`;
+      const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+      await actx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
+      node = new AudioWorkletNode(actx, 'ldt-beep');
+      node.port.onmessage = e => onBeep(e.data);
+    } else {
+      const proc = createBeepDetector(actx.sampleRate), out = [];
+      node = actx.createScriptProcessor(1024, 1, 1);
+      node.onaudioprocess = e => { proc(e.inputBuffer.getChannelData(0), e.playbackTime || actx.currentTime, out); out.forEach(onBeep); out.length = 0; };
+    }
+    src.connect(node).connect(sink).connect(actx.destination);
+    st.mic = { stream, src, node };
+    pill.textContent = pill.textContent.replace(' \u00b7 mic on', '') + ' \u00b7 mic on';
+    return true;
+  }catch(err){
+    setStatus('Microphone failed: ' + err.name + '. Allow microphone access so this device can hear the start beep.');
+    return false;
+  }
+}
+function stopMic(){
+  if(!st.mic) return;
+  try{ st.mic.src.disconnect(); st.mic.node.disconnect(); }catch(e){}
+  st.mic.stream.getTracks().forEach(t => t.stop()); st.mic = null;
+}
+function onBeep(e){
+  if(e.type !== 'beep') return;
+  const tp = ctxToPerf(e.t);
+  if(st.cal && Math.abs(tp - st.cal.at) < 700){   // this device's own beep: measure the microphone lag
+    const lag = Math.round(tp - st.cal.at);
+    st.cal = null;
+    if(lag >= 0 && lag <= 400){ S.micLag = lag; lsSet(LS_SET, S); loadFields(); if(st.mode === 'idle') setStatus('Microphone lag measured: ' + lag + ' ms.'); }
+    return;
+  }
+  if(st.mode === 'armed') beginCapture(tp - S.micLag);
+}
+
+// ---------------------------------------------------------------------------
+// Reps
+// ---------------------------------------------------------------------------
+function arm(){
+  if(!(st.mode === 'idle' || (st.mode === 'done' && S.source === 'own'))){ stop(); return; }
+  ensureAudio(); clearTimers();
+  btnArm.textContent = 'Stop';
+  if(S.source === 'own'){
+    st.mode = 'standby'; setStatus('Standby.');
+    const delay = (S.minDelay + Math.random() * Math.max(0, S.maxDelay - S.minDelay)) * 1000;
+    timer(() => { const at = beep(); beginCapture(at); }, delay);
+  } else {
+    st.mode = 'armed'; setStatus('Listening for the main phone\u2019s start beep.');
+  }
+}
+function beginCapture(t0){
+  clearTimers();
+  st.rep++; st.t0 = t0; st.mode = 'capturing'; st.live = null;
+  repLabel.textContent = 'Rep ' + st.rep; setStatus('Go.');
+  startRecording();
+  timer(finishCapture, Math.max(500, S.capture * 1000 - (performance.now() - t0)));
+}
+function finishCapture(){
+  if(st.mode !== 'capturing') return;
+  const t0 = st.t0, o = opts();
+  const d = analyzeDraw(st.buf, t0, o);
+  const from = d.on != null ? t0 + d.on * 1000 : t0;
+  const rec = { kind: 'shooter', n: st.rep, at: new Date().toISOString(), source: S.source, hand: S.hand, draw: d,
+    reloads: d.on != null ? findReloads(st.buf, from, t0, o) : [], moves: findMoves(st.buf, from, t0, o), fps: Math.round(st.fps), micLag: S.micLag };
+  st.live = d; st.mode = 'done';
+  history.push(rec); if(history.length > 200) history = history.slice(-200);
+  lsSet(LS_HIST, history);
+  showTime(d.on); render(rec); renderHistory();
+  setStatus(summary(rec));
+  stopRecording();
+  if(S.source === 'listen'){ timer(() => { if(st.mode === 'done'){ st.mode = 'armed'; btnArm.textContent = 'Stop'; } }, 1200); }
+  else { btnArm.textContent = 'Start rep'; }
+}
+function stop(){
+  clearTimers();
+  if(st.recorder && st.recorder.state !== 'inactive'){ st.recorder.onstop = null; try{ st.recorder.stop(); }catch(e){} }
+  st.recorder = null;
+  if(st.mode !== 'idle') setStatus('Stopped.');
+  st.mode = 'idle'; st.live = null;
+  btnArm.textContent = S.source === 'own' ? 'Start rep' : 'Listen for beep';
+}
+function summary(r){
+  const d = r.draw;
+  if(d.on == null && d.grip == null) return 'Rep ' + r.n + ': the camera did not see a draw. Check that your gun hand and hips stay in view.';
+  let msg = 'Rep ' + r.n + ': ' + (d.on != null ? 'on target at ' + fmt(d.on) + ' s' : 'gun ' + (d.out != null ? 'out at ' + fmt(d.out) + ' s, never steady on target' : 'hand reached the holster at ' + fmt(d.grip) + ' s'));
+  if(r.reloads.length) msg += ', ' + r.reloads.length + ' reload' + (r.reloads.length > 1 ? 's' : '');
+  if(r.moves.length) msg += ', ' + r.moves.length + ' move' + (r.moves.length > 1 ? 's' : '');
+  return msg + '.';
+}
+function render(r){
+  const d = r.draw, row = (k, at, seg) => '<div><span>' + k + (seg != null ? ' <small>(' + seg + ')</small>' : '') + '</span><b>' + fmt(at) + ' s</b></div>';
+  drawRows.innerHTML = row('Reaction: hand starts moving', d.react)
+    + row('Hand on gun', d.grip)
+    + row('Gun out of the holster', d.out, d.clear != null ? '+' + fmt(d.clear) + ' s' : null)
+    + row('On target', d.on, d.present != null ? '+' + fmt(d.present) + ' s' : null);
+  const ev = r.reloads.map((x, i) => '<div><span>Reload ' + (i + 1) + ' <small>(at ' + fmt(x.at) + ' s)</small></span><b>' + fmt(x.dur) + ' s</b></div>')
+    .concat(r.moves.map((x, i) => '<div><span>Move ' + (i + 1) + ' <small>(at ' + fmt(x.at) + ' s, ' + x.dist.toFixed(1) + ' torso lengths)</small></span><b>' + fmt(x.dur) + ' s</b></div>'));
+  eventRows.innerHTML = ev.length ? ev.join('') : '<div class="empty">No reloads or moves in this rep.</div>';
+}
+function renderHistory(){
+  const recent = history.slice(-10).reverse();
+  histEl.innerHTML = recent.length
+    ? '<table><tr><th>On target</th><th>Hand on gun</th><th>Gun out</th><th>Reloads</th><th>Moves</th><th>When</th></tr>' + recent.map(r => {
+        const w = new Date(r.at);
+        return '<tr><td>' + fmt(r.draw.on) + '</td><td>' + fmt(r.draw.grip) + '</td><td>' + fmt(r.draw.out) + '</td><td>' + r.reloads.length + '</td><td>' + r.moves.length + '</td><td>' + w.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '</td></tr>';
+      }).join('') + '</table>'
+    : '';
+}
+
+// ---------------------------------------------------------------------------
+// Replay: records the canvas, so the skeleton and times are part of the video
+// ---------------------------------------------------------------------------
+function startRecording(){
+  if(!S.record || !window.MediaRecorder || !view.captureStream) return;
+  const type = ['video/mp4', 'video/webm;codecs=vp9', 'video/webm'].find(t => MediaRecorder.isTypeSupported(t));
+  if(!type) return;
+  try{
+    st.chunks = [];
+    const rec = new MediaRecorder(view.captureStream(30), { mimeType: type, videoBitsPerSecond: 2500000 });
+    rec.ondataavailable = e => { if(e.data && e.data.size) st.chunks.push(e.data); };
+    rec.onstop = () => {
+      if(!st.chunks.length) return;
+      const blob = new Blob(st.chunks, { type: type.split(';')[0] });
+      if(st.replayUrl) URL.revokeObjectURL(st.replayUrl);
+      st.replayUrl = URL.createObjectURL(blob);
+      replay.src = st.replayUrl; replayCard.hidden = false;
+      dl.href = st.replayUrl; dl.download = 'shooter-rep-' + st.rep + (type.indexOf('mp4') >= 0 ? '.mp4' : '.webm');
+    };
+    rec.start(); st.recorder = rec;
+  }catch(e){ st.recorder = null; }
+}
+function stopRecording(){
+  const rec = st.recorder;
+  if(rec && rec.state !== 'inactive') timer(() => { try{ rec.stop(); }catch(e){} }, 400);   // keep the final times on screen briefly
+  st.recorder = null;
+}
+document.querySelectorAll('[data-rate]').forEach(b => b.addEventListener('click', () => { replay.playbackRate = parseFloat(b.dataset.rate); replay.play().catch(() => {}); }));
+
+// ---------------------------------------------------------------------------
+// Holster calibration: averages where the gun-hand wrist sits on the holstered gun
+// ---------------------------------------------------------------------------
+btnHolster.addEventListener('click', () => {
+  if(st.mode !== 'idle' && st.mode !== 'done') stop();
+  let left = 3;
+  setStatus('Put your gun hand on the holstered gun. Marking in ' + left + ' s.');
+  const tick = setInterval(() => {
+    left--;
+    if(left > 0){ setStatus('Put your gun hand on the holstered gun. Marking in ' + left + ' s.'); return; }
+    clearInterval(tick);
+    st.mark = [];
+    setTimeout(() => {
+      const m = st.mark || []; st.mark = null;
+      if(m.length < 3){ setStatus('The camera did not see your gun hand and hips. Step back so both are in view, then mark again.'); return; }
+      let dx = 0, dy = 0;
+      m.forEach(s => { dx += (s.gw[0] - s.gh[0]) / s.scale; dy += (s.gw[1] - s.gh[1]) / s.scale; });
+      S.holster = [Math.round(dx / m.length * 100) / 100, Math.round(dy / m.length * 100) / 100];
+      lsSet(LS_SET, S);
+      setStatus('Holster marked. The white circle shows it. ' + (S.source === 'own' ? 'Tap Start rep.' : 'Tap Listen for beep.'));
+    }, 600);
+  }, 1000);
+});
+
+btnCam.addEventListener('click', startCamera);
+btnArm.addEventListener('click', arm);
+btnBeep.addEventListener('click', async () => { if(!(await startMic())) return; beep(); setStatus('Beep played. Listening for it to measure the microphone lag.'); });
+$('btnReset').addEventListener('click', () => { Object.assign(S, DEFAULTS, { holster: [0, -0.25] }); lsSet(LS_SET, S); loadFields(); syncSource(); setStatus('Settings reset.'); });
+$('btnCopy').addEventListener('click', async () => {
+  try{ await navigator.clipboard.writeText(JSON.stringify(history, null, 2)); setStatus('Copied ' + history.length + ' reps as JSON.'); }
+  catch(e){ setStatus('Clipboard unavailable. Allow clipboard access and try again.'); }
+});
+$('btnClear').addEventListener('click', () => { history = []; lsSet(LS_HIST, history); renderHistory(); setStatus('History cleared.'); });
+document.addEventListener('visibilitychange', () => { if(document.hidden && st.mode !== 'idle') stop(); });
+
+loadFields(); syncSource(); renderHistory();
+})();
+</script>
+</body>
+</html>

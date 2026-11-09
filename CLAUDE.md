@@ -1,6 +1,6 @@
 # Laser Draw Trainer
 
-Single-file phone web app (`index.html`) for laser dry-fire training. Plain HTML, CSS, and JavaScript. No bundler, no framework, no npm dependencies.
+Single-file phone web app (`index.html`) for laser dry-fire training, plus a single-file Shooter cam page (`shooter.html`) for a second device. Plain HTML, CSS, and JavaScript. No bundler, no framework, no npm dependencies.
 
 ## Global rules
 
@@ -10,9 +10,10 @@ The file below is synced from zachwithanach/claude-config. Edit it there, never 
 
 ## Conventions
 
-- Keep the app in one self-contained `index.html`. External resources are limited to Google Fonts.
+- Keep the app in one self-contained `index.html` and the Shooter cam in one self-contained `shooter.html`. External resources are limited to Google Fonts, plus the MediaPipe pose model in `shooter.html`.
 - Keep the detector, geometry, targets, aim, analysis, click-detector, string-scoring (`@ldt-score`), screen-test (`@ldt-screen`), and reset-click (`@ldt-reset`) code pure (no DOM access) and inside their `// @ldt-*-start` / `// @ldt-*-end` markers. `tests/run.js` extracts those blocks. `createClickDetector` is also serialized into the AudioWorklet with `toString()`, so it must not reference anything outside its own body.
-- Run `node tests/run.js` after any change to detection or calibration. Add a synthetic test for every bug you fix.
+- In `shooter.html`, keep the pose analysis (`@ldt-pose`) and start-beep detector (`@ldt-beep`) pure. `tests/shooter.js` extracts them, and `createBeepDetector` is serialized into an AudioWorklet.
+- Run `node tests/run.js` after any change to detection or calibration, and `node tests/shooter.js` after any change to `shooter.html`. Add a synthetic test for every bug you fix.
 - Store state in `localStorage` with try/catch. The page must work when storage is unavailable.
 - Write UI copy in sentence case, active voice, plain verbs.
 - Write status messages as instructions, not apologies.
@@ -23,7 +24,7 @@ Use the subagents in `.claude/agents/`. Each owns one workstream and reports bac
 
 | Agent | Owns |
 |---|---|
-| detection | `createDetector`, `createClickDetector`, reset-click filter (`@ldt-reset`), shot resolution (`handleClick`, `dotAt`) |
+| detection | `createDetector`, `createClickDetector`, reset-click filter (`@ldt-reset`), shot resolution (`handleClick`, `dotAt`), pose analysis and beep detection in `shooter.html` |
 | calibration | corner taps and dragging, saved calibration, homography, multi-target classification (`@ldt-targets`), TV screen location (`@ldt-screen`), ArUco |
 | drills | shot timer, par, callouts, drill state machine, strings and hit factor (`@ldt-score`) |
 | ui | layout, settings, hit map, history |

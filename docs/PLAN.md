@@ -21,6 +21,9 @@ Live app: https://zachwithanach.github.io/laser-draw-trainer/
 | 2026-11-06 | TV range: the main phone draws the range in a laser-safe palette, mirrors it to the TV with AirPlay, and watches the TV with its rear camera. The screen test gates all further range work. |
 | 2026-11-09 | Stage scoring and the TV screen test shipped to `main` (ea4e464). The resetting trigger is a Standard DryFireMag. |
 | 2026-11-09 | A resetting trigger clicks twice per press: the break, then the reset on release. Learn trigger click groups the clicks by press; a reset at most 1/1.6 of the break's level is filtered by the threshold, and an equally loud reset is skipped as the first click within the reset window after each shot. |
+| 2026-11-09 | DryFireMag check passed: 5 strings, 10 presses, every press scored once in skip mode, no reset click scored. |
+| 2026-11-09 | Dual-camera check on the iPhone 14 Pro Max (Safari 26.6) failed: the rear camera ends when the front camera opens. Body tracking runs on a laptop with a webcam. |
+| 2026-11-09 | Shooter cam is its own page, `shooter.html`, so the second device never loads the main app and the main phone never loads the pose model. Its pure code is tested by `tests/shooter.js`. |
 | 2026-11-06 | Body tracking runs on a spare phone or tablet, because iPhone Safari ends one camera's feed when a page opens another. Each device times from the beep it hears; pairing is by QR code, with no server. |
 
 ## Phase 1: core (shipped)
@@ -100,7 +103,8 @@ Project plan: the Word plan delivered on 2026-11-06. Each part ships as its own 
 - [x] drills: fix Start drill needing two taps after a finished rep with auto-repeat off.
 - [x] qa: tests for scoring, the string tracker, string analysis, and a synthetic string of trigger clicks through the click detector.
 - [x] detection: filter the reset click of a resetting trigger (`@ldt-reset`): two-click learning, level and skip modes, per-shot click level and per-string reset count in the history.
-- [ ] qa: run five strings on the DryFireMag and confirm every press scores once and no reset scores; tune the threshold, reset window, and minimum split if not.
+- [x] qa: five strings on the DryFireMag: every press scored once and no reset scored (skip mode, click level 0.19 to 0.24, shortest split 0.55 s).
+- [ ] qa: stress the skip filter with 4 shots per target at full speed.
 - [ ] calibration: USPSA zone shapes, tied to the printable target in Phase 2.
 
 ### TV range
@@ -119,10 +123,14 @@ Project plan: the Word plan delivered on 2026-11-06. Each part ships as its own 
 
 ### Body tracking
 
-- [ ] detection: Shooter cam mode on a second device with MediaPipe Pose loaded from a CDN script tag.
-- [ ] drills: draw, reload, and movement times from the beep each device hears.
-- [ ] infra: QR pairing for a live link, with a one-way QR transfer as fallback.
-- [ ] ui: third-person video with the pose overlay, reusing video replay.
+- [x] detection: Shooter cam page (`shooter.html`) for a second device, with MediaPipe Pose loaded from a CDN (`@ldt-pose`).
+- [x] detection: start-beep detector, a 1800 Hz tone match that ignores clicks, the par beep, and voices (`@ldt-beep`); microphone lag measured from the device's own beep.
+- [x] drills: draw phases (reaction, hand on gun, gun out, on target), reloads, and moves between positions, timed from the beep the device hears.
+- [x] ui: replay video of each rep with the skeleton and times burned in; slow-motion playback and download.
+- [x] calibration: Mark holster, so hip and appendix carry both work.
+- [ ] qa: first real session on the laptop; tune the draw, reload, and movement thresholds from it.
+- [ ] infra: QR pairing for a live link, with a one-way QR transfer as fallback, so shooter-cam times attach to the phone's reps.
+- [ ] drills: shot times on the shooter cam (trigger click), for presentation-to-shot time.
 
 ## Known limits
 
