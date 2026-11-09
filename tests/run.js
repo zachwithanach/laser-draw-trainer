@@ -10,7 +10,7 @@ function block(name){
   if(!m) throw new Error('Marker block not found: ' + name);
   return m[1];
 }
-const lib = new Function(block('detector') + block('geom') + block('click') + block('targets') + block('aim') + block('analysis') + '\nreturn { createDetector, homographyToUnit, applyH, createClickDetector, aimCheck, analyzeReps, classifyHit, nearAnyTarget, withinTargets, pickTarget };')();
+const lib = new Function(block('detector') + block('geom') + block('click') + block('targets') + block('aim') + block('analysis') + block('score') + block('screen') + '\nreturn { createDetector, homographyToUnit, applyH, invertH, createClickDetector, aimCheck, analyzeReps, classifyHit, nearAnyTarget, withinTargets, pickTarget, scoreString, createStringTracker, analyzeStrings, RANGE_PALETTE, laserDominance, findScreenQuad, estimateDelay, flashSync, inStep };')();
 
 let fails = 0;
 function ok(cond, msg){ console.log((cond ? 'PASS ' : 'FAIL ') + msg); if(!cond) fails++; }
@@ -199,6 +199,127 @@ const am = lib.analyzeReps(multi, { targetW: 8.5, targetH: 11 });
 ok(am.perTarget && am.perTarget.length === 2 && am.perTarget[1].avg === 2.5, 'per-target averages computed (T2 ' + (am.perTarget && am.perTarget[1].avg) + ' s)');
 ok(am.zones.Wrong === 1 && am.notes.some(x => /wrong target/.test(x)), 'wrong-target count and note');
 ok(am.notes.some(x => /Target 2 averages/.test(x)), 'slow-transition note names target 2');
+
+// --- Inverse homography (simulated shots map unit-square points back to the image) ---
+{
+  const cs = [{ x: 10, y: 8 }, { x: 60, y: 9 }, { x: 58, y: 44 }, { x: 12, y: 42 }];
+  const Hf = lib.homographyToUnit(cs), Hi = lib.invertH(Hf);
+  const close = (p, x, y) => Math.abs(p[0] - x) < 1e-6 && Math.abs(p[1] - y) < 1e-6;
+  const mid = lib.applyH(Hf, 33, 25), back = lib.applyH(Hi, mid[0], mid[1]);
+  ok(!!Hi && close(lib.applyH(Hi, 0, 0), 10, 8) && close(lib.applyH(Hi, 1, 1), 58, 44) && close(back, 33, 25), 'invertH maps unit corners back to image corners and round-trips an interior point');
+}
+
+// --- Stage scoring (Comstock, minor and major) ---
+{
+  const shots = [{ zone: 'A', target: 0 }, { zone: 'C', target: 0 }, { zone: 'A', target: 1 }, { zone: 'D', target: 1 }];
+  const mi = lib.scoreString(shots, { targets: 2, perTarget: 2, pf: 'minor', time: 2 });
+  const ma = lib.scoreString(shots, { targets: 2, perTarget: 2, pf: 'major', time: 2 });
+  ok(mi.points === 14 && mi.misses === 0 && mi.hf === 7, 'minor: 2A 1C 1D = 14 points, hit factor 7.00 over 2.00 s (got ' + mi.points + ', ' + mi.hf + ')');
+  ok(ma.points === 16 && ma.hf === 8, 'major: same hits = 16 points, hit factor 8.00 (got ' + ma.points + ', ' + ma.hf + ')');
+  const extra = lib.scoreString([{ zone: 'D', target: 0 }, { zone: 'A', target: 0 }, { zone: 'C', target: 0 }, { zone: 'Miss', target: -1 }, { zone: 'A', target: 1 }],
+    { targets: 2, perTarget: 2, pf: 'minor', time: 3 });
+  ok(extra.points === 13 && extra.misses === 1 && extra.penalty === 10 && extra.net === 3 && extra.hf === 1, 'best two hits per target count, a missing hit costs 10 (13 - 10 = 3 over 3 s, got ' + extra.net + ', HF ' + extra.hf + ')');
+  const zero = lib.scoreString([{ zone: 'Miss', target: -1 }], { targets: 1, perTarget: 2, pf: 'minor', time: 2 });
+  ok(zero.net === 0 && zero.hf === 0 && zero.misses === 2, 'all misses floor at 0 points and hit factor 0');
+  ok(lib.scoreString([{ zone: 'Hit', target: -1 }], { targets: 1, perTarget: 2, pf: 'minor', time: 2 }) === null, 'uncalibrated hits return no score');
+}
+
+// --- String tracker ---
+{
+  const tr = lib.createStringTracker({ rounds: 4, gapMs: 3000, minSplitMs: 100 });
+  const r = [tr.add(1500, {}), tr.add(1540, {}), tr.add(1800, {}), tr.add(2100, {}), tr.add(2500, {})];
+  ok(r.join() === 'shot,dup,shot,shot,done' && tr.shots.length === 4 && tr.shots[1].split === 300 && tr.shots[3].split === 400, 'tracker: echo inside 100 ms dropped, splits recorded, done at the round count (' + r.join() + ')');
+  const t2 = lib.createStringTracker({ rounds: 4, gapMs: 3000 });
+  t2.add(1000, {});
+  ok(!t2.idle(3500) && t2.idle(4100), 'tracker: string ends after 3 s without a shot');
+}
+
+// --- Simulated string: synthetic trigger audio through the click detector into the tracker ---
+{
+  const sr = 48000, dur = 4, beepAt = 0.5, clicks = [1.62, 1.91, 2.19, 2.57], echo = 2.19 + 0.07;
+  const buf = new Float32Array(sr * dur);
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for(let i = 0; i < buf.length; i++) buf[i] = (rnd() - 0.5) * 0.006;
+  const burst = (t0, amp) => { const s0 = Math.round(t0 * sr); for(let k = 0; k < sr * 0.015; k++) buf[s0 + k] += amp * Math.exp(-k / (0.002 * sr)) * (k % 2 ? 1 : -1); };
+  clicks.forEach(t => burst(t, 0.5)); burst(echo, 0.25);
+  const proc = lib.createClickDetector(sr), out = [];
+  for(let i = 0; i < buf.length; i += 128) proc(buf.subarray(i, i + 128), i / sr, out);
+  const heard = out.filter(e => e.type === 'click' && e.peak >= 0.1);
+  const tr = lib.createStringTracker({ rounds: 4, gapMs: 3000, minSplitMs: 100 });
+  const res = heard.map(e => tr.add((e.t - beepAt) * 1000, { zone: 'A', target: 0 }));
+  const splits = tr.shots.slice(1).map(s => s.split), want = [290, 280, 380];
+  ok(heard.length === 5 && res.join() === 'shot,shot,shot,dup,done' && splits.every((s, i) => Math.abs(s - want[i]) < 3) && Math.abs(tr.shots[0].t - 1120) < 3,
+    'synthetic string: 4 clicks and an echo yield 4 shots, first ' + Math.round(tr.shots[0].t) + ' ms, splits ' + splits.map(Math.round).join('/') + ' ms');
+}
+
+// --- String analysis ---
+{
+  const sh = (t, split, target) => ({ t, split, target, zone: 'A' });
+  const s1 = { kind: 'string', t: 2.6, first: 1.5, par: 3, shots: [sh(1.5, null, 1), sh(1.8, 0.3, 1), sh(2.3, 0.5, 2), sh(2.6, 0.3, 2)], hf: 5, zones: { A: 3, C: 1, D: 0 }, misses: 0 };
+  const s2 = { kind: 'string', t: 2.9, first: 1.6, par: 3, shots: [sh(1.6, null, 1), sh(1.88, 0.28, 1), sh(2.43, 0.55, 2), sh(2.72, 0.29, 2)], hf: 4.5, zones: { A: 2, C: 1, D: 0 }, misses: 1 };
+  const s3 = { kind: 'string', t: null, first: null, par: 3, shots: [], early: true };
+  const a = lib.analyzeStrings([s1, s2, s3]);
+  ok(a.timed === 2 && a.avg === 2.75 && a.best === 2.6 && a.underPar === 2 && a.first === 1.55 && a.early === 1, 'string analysis: average 2.75 s, best 2.60 s, first shot 1.55 s, one early string');
+  ok(a.split === 0.29 && a.transition === 0.53 && a.hf === 4.75 && a.bestHf === 5 && a.misses === 1, 'string analysis: split 0.29 s, transition 0.53 s, HF 4.75 average, 5.00 best (got ' + a.split + ', ' + a.transition + ', ' + a.hf + ')');
+  ok(a.notes.some(x => /Transitions average 0.53 s against 0.29 s/.test(x)) && a.notes.some(x => /1 miss cost 10 penalty points/.test(x)), 'string notes: slow transitions and miss penalty');
+  const slow = [1, 2, 3].map(() => ({ kind: 'string', t: 2.5, first: 1.4, par: 2, shots: [sh(1.4, null, 1), sh(2.5, 1.1, 1)], hf: null }));
+  ok(lib.analyzeStrings(slow).suggestedPar === 2.5, 'string par suggestion: no string under 2.00 s par suggests 2.50 s');
+  ok(/Complete a few strings/.test(lib.analyzeStrings([]).notes[0]), 'no strings yet: prompt to complete a few');
+}
+
+// --- TV range picture: palette and detector on moving content ---
+{
+  const P = lib.RANGE_PALETTE;
+  ok(Object.keys(P).every(k => lib.laserDominance(P[k]) < 40), 'range palette: no color reads as a red or green laser (max dominance ' + Math.max.apply(null, Object.keys(P).map(k => lib.laserDominance(P[k]))) + ')');
+  const scene = sx => (x, y) => {
+    if(Math.hypot(x - sx, y - 38) < 4) return P.steel;                         // swinger plate
+    if(Math.abs(x - (60 - sx)) < 5 && Math.abs(y - 30) < 8) return P.target;  // moving light target
+    if(x > 26 && x < 38 && y > 10 && y < 30) return P.target;                 // center target
+    return y > 33 ? P.berm : P.bg;
+  };
+  let clean = true;
+  [60, 100].forEach(sens => ['red', 'any'].forEach(color => {
+    const dd = lib.createDetector(W, H);
+    for(let i = 0; i < 20; i++) dd.run(frame(scene(10)), { sens, color });
+    for(let i = 0; i < 40; i++){ const r = dd.run(frame(scene(10 + i)), { sens, color }); if(r.blob || r.flooded) clean = false; }
+  }));
+  ok(clean, 'moving range content (swinger and target) never reads as a dot at sensitivity 60 or 100, red or either mode');
+  const dd = lib.createDetector(W, H);
+  for(let i = 0; i < 20; i++) dd.run(frame(scene(10)), { sens: 60, color: 'red' });
+  const r = dd.run(frame(withDot(scene(30), 32, 20, 2.5, RED_CORE, RED_FRINGE)), { sens: 60, color: 'red' });
+  ok(near(r.blob, 32.5, 20.5), 'red dot on the TV center target detected at ' + at(r.blob));
+}
+
+// --- TV screen location and display delay ---
+{
+  const Q = [{ x: 10, y: 8 }, { x: 54, y: 10 }, { x: 52, y: 40 }, { x: 12, y: 38 }];
+  const inside = (x, y) => {
+    for(let i = 0; i < 4; i++){ const a = Q[i], b = Q[(i + 1) % 4]; if((b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x) < 0) return false; }
+    return true;
+  };
+  let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const lumFrame = on => { const l = new Uint8Array(W * H); for(let y = 0; y < H; y++) for(let x = 0; x < W; x++) l[y * W + x] = Math.max(0, Math.min(255, Math.round((inside(x + 0.5, y + 0.5) ? (on ? 220 : 25) : 70) + (rnd() - 0.5) * 12))); return l; };
+  const frames = []; for(let k = 0; k < 8; k++) frames.push({ t: k * 700, lum: lumFrame(k % 2 === 0) });
+  const q = lib.findScreenQuad(frames, W, H);
+  const err = q ? Math.max.apply(null, q.corners.map((c, i) => Math.hypot(c.x - Q[i].x, c.y - Q[i].y))) : 99;
+  ok(q && err <= 1.6, 'screen located from white and black frames, worst corner off by ' + err.toFixed(2) + ' px');
+  const still = []; for(let k = 0; k < 8; k++) still.push({ t: k * 700, lum: lumFrame(false) });
+  ok(lib.findScreenQuad(still, W, H) === null && lib.findScreenQuad(frames.slice(0, 3), W, H) === null, 'no screen reported when nothing flashes or too few frames');
+  const sw = []; for(let k = 0; k < 8; k++) sw.push({ t: 1000 + k * 700, on: k % 2 === 0 });
+  const samples = [];
+  for(let t = 900; t < 7000; t += 1000 / 30){
+    let on = false; sw.forEach(s => { if(s.t <= t - 180) on = s.on; });
+    samples.push({ t, v: (on ? 200 : 30) + (rnd() - 0.5) * 6 });
+  }
+  const d = lib.estimateDelay(samples, sw);
+  ok(d != null && d >= 180 && d <= 214, 'display delay of 180 ms measured as ' + d + ' ms (one 30 fps frame of slack)');
+  ok(lib.estimateDelay(samples.map(s => ({ t: s.t, v: 50 })), sw) === null, 'flat brightness gives no delay');
+  const sync = lib.flashSync(samples, sw);
+  ok(lib.inStep(sync, sw) && sync.matched === 7, 'flashes in step: all 7 switches seen, delay spread ' + sync.spread + ' ms');
+  const drift = []; for(let t = 900; t < 7000; t += 1000 / 30) drift.push({ t, v: (Math.floor(t / 1130) % 2 ? 200 : 30) + (rnd() - 0.5) * 6 });
+  const ds = lib.flashSync(drift, sw);
+  ok(!lib.inStep(ds, sw), 'brightness that flashes out of step with the test is rejected (seen ' + ds.matched + ' of 7, spread ' + ds.spread + ' ms)');
+}
 
 console.log(fails ? fails + ' test(s) failed' : 'All tests passed');
 process.exit(fails ? 1 : 0);
