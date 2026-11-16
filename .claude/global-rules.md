@@ -169,3 +169,19 @@ Teams (teammates share a task list and message each other).
 - Never name a file, folder, document, sheet, or anything else you create
   after Claude, Anthropic, or any AI tool, and never label created content
   as AI-generated.
+
+## Connected browsers
+Claude in Chrome labels browsers "Browser 1", "Browser 2", and so on, and
+the numbers reshuffle when a browser connects. Identify each browser by
+deviceId, and show Zach these names instead of the numbers.
+
+| deviceId | Machine | OS |
+|---|---|---|
+| ef9732a7-eb66-4518-b7ac-9d238d6bb33e | PC2301 (home PC) | Windows |
+| 27714cd5-5aff-4284-a8e7-d4c3c03ed08f | lt2301 laptop, "CLAUDECOMPUTER" | Windows |
+| ec7cece6-6787-4554-929e-647c25b1eded | VB Spine work laptop | Windows |
+| 157409c9-3df6-4bbf-ae91-33b2be2a5c5a | ORBCOMM work laptop | Windows |
+| 62b0878b-5c7b-4319-8694-1eb5f8d56b31 | vm104 on Proxmox (unconfirmed) | Linux |
+
+Confirmed with test tabs on 2026-11-16. A deviceId that isn't in this
+table is new or unknown. Ask Zach before using it.
